@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="sidepanel.css">
+  <title>Upwork Keyword Finder</title>
+</head>
+<body>
+  <div id="app">
+    
+    <!-- Header -->
+    <header class="sp-header">
+      <div class="sp-logo">🔍 Keyword Finder</div>
+      <div id="ai-badge" class="badge" style="display:none"></div>
+    </header>
+
+    <!-- Nav Tabs -->
+    <nav class="sp-nav">
+      <button class="nav-tab active" data-view="home">Home</button>
+      <button class="nav-tab" data-view="results">Results</button>
+      <button class="nav-tab" data-view="history">History</button>
+      <button class="nav-tab" data-view="settings">Settings</button>
+    </nav>
+
+    <!-- View: Home -->
+    <div id="view-home" class="view active">
+      <div id="page-status"></div>
+      
+      <div class="scrape-section">
+        <button id="btn-scrape" class="btn btn-primary">
+          🕷️ Scrape & Analyze Keywords
+        </button>
+        <button id="btn-scrape-only" class="btn btn-secondary" style="margin-top: 10px;">
+          📥 Scrape & Save Data Only (No AI)
+        </button>
+        <p class="hint" id="scrape-hint">Navigate to an Upwork job search page first</p>
+      </div>
+      
+      <div id="scrape-progress" style="display:none">
+        <div class="progress-bar"><div class="progress-fill"></div></div>
+        <p id="progress-text">Scraping jobs...</p>
+      </div>
+      
+      <div id="home-stats" class="stats-grid" style="display:none">
+        <div class="stat-card">
+          <span class="stat-number" id="stat-sessions">0</span>
+          <span class="stat-label">Scrape Sessions</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-number" id="stat-jobs">0</span>
+          <span class="stat-label">Total Jobs Stored</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-number" id="stat-last-count">0</span>
+          <span class="stat-label">Jobs Last Scrape</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- View: Results -->
+    <div id="view-results" class="view">
+      <div id="no-results-msg">Run a scrape to see results</div>
+      
+      <div id="results-content" style="display:none">
+        <div class="results-meta">
+          <span id="results-count"></span>
+          <span id="results-method"></span>
+        </div>
+        
+        <div class="tab-bar">
+          <button class="tab active" data-tab="skills">Skills & Tech</button>
+          <button class="tab" data-tab="titles">Title Words</button>
+          <button class="tab" data-tab="phrases">Phrases</button>
+        </div>
+
+        <div id="tab-skills" class="tab-content active"></div>
+        <div id="tab-titles" class="tab-content"></div>
+        <div id="tab-phrases" class="tab-content"></div>
+        
+        <div class="actions-row">
+          <button id="btn-copy-keywords" class="btn btn-secondary">📋 Copy Keywords</button>
+          <button id="btn-clear-highlights" class="btn btn-secondary">✕ Clear Highlights</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- View: History -->
+    <div id="view-history" class="view">
+      <div class="history-header">
+        <h3>Scrape History</h3>
+        <button id="btn-export" class="btn btn-secondary">⬇️ Export All JSON</button>
+      </div>
+      <div id="history-list"></div>
+    </div>
+
+    <!-- View: Settings -->
+    <div id="view-settings" class="view">
+      <div class="setting-row">
+        <label>Min keyword frequency</label>
+        <input type="number" id="pref-min-freq" min="1" max="20" value="10">
+      </div>
+      <div class="setting-row">
+        <label>Highlight keywords on page</label>
+        <input type="checkbox" id="pref-highlight" checked>
+      </div>
+      <div class="setting-row" style="margin-top: 2rem;">
+        <button id="btn-clear-storage" class="btn btn-danger">🗑️ Clear All Stored Data</button>
+      </div>
+    </div>
+    
+  </div>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
