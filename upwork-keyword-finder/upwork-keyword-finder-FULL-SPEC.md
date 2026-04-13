@@ -206,7 +206,7 @@ The title text may contain `<span class="highlight">` tags wrapping the search t
 
 Text content: "Posted 10 minutes ago" or "Posted 1 hour ago" or "Posted 2 hours ago"
 
-**Parse:** Extract the second `<span>` inside it for relative time string.
+**Parse:** Extract the text content as `postedRelative`. Then, to generate a concrete timestamp (`postedAt`), use a regex `/(\d+)\s+(minute|hour|day|week|month)s?\s+ago/i` to extract the amount and unit. Subtract that amount from `scrapedAt` to create an ISO timestamp!
 
 ### 5.4 Job Description
 
@@ -305,6 +305,7 @@ Every scraped job is stored as a complete JSON object. This is the schema:
       "titleRaw": "Shopify Store Design and Development",
       "url": "https://www.upwork.com/jobs/Shopify-Store-Design-and-Development_~022043271459774853868/",
       "postedRelative": "10 minutes ago",
+      "postedAt": "2026-04-12T09:50:00.000Z",
       
       "description": "We are looking for a skilled professional to build and design our Shopify store...",
       

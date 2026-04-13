@@ -40,6 +40,22 @@ function extractJobFromTile(tile, position, scrapedAt) {
   const dateEl = tile.querySelector('[data-test="job-pubilshed-date"]');
   const postedRelative = dateEl ? dateEl.textContent.trim().replace(/\s+/g, ' ') : '';
   
+  let postedAt = scrapedAt;
+  if (postedRelative) {
+    const match = postedRelative.match(/(\d+)\s+(minute|hour|day|week|month)s?\s+ago/i);
+    if (match) {
+        const amount = parseInt(match[1]);
+        const unit = match[2].toLowerCase();
+        const pastDate = new Date(scrapedAt);
+        if (unit.startsWith('minute')) pastDate.setMinutes(pastDate.getMinutes() - amount);
+        else if (unit.startsWith('hour')) pastDate.setHours(pastDate.getHours() - amount);
+        else if (unit.startsWith('day')) pastDate.setDate(pastDate.getDate() - amount);
+        else if (unit.startsWith('week')) pastDate.setDate(pastDate.getDate() - (amount * 7));
+        else if (unit.startsWith('month')) pastDate.setMonth(pastDate.getMonth() - amount);
+        postedAt = pastDate.toISOString();
+    }
+  }
+  
   // --- DESCRIPTION ---
   const descEl = tile.querySelector('[data-test="UpCLineClamp JobDescription"] p')
               || tile.querySelector('p.mb-0.text-body-sm.rr-mask');
@@ -129,6 +145,7 @@ function extractJobFromTile(tile, position, scrapedAt) {
     title,
     url,
     postedRelative,
+    postedAt,
     description,
     skills,
     jobType,
