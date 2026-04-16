@@ -1,6 +1,6 @@
 // content/highlighter.js
 
-const HIGHLIGHT_COLORS = {
+var HIGHLIGHT_COLORS = {
   high:   { bg: '#FFF176', border: '#F9A825' },
   medium: { bg: '#E8F5E9', border: '#66BB6A' },
   low:    { bg: '#E3F2FD', border: '#42A5F5' }

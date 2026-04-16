@@ -9,6 +9,16 @@ async function init() {
   await loadStats();
   await checkCurrentPage();
   setupEventListeners();
+
+  // Listen for tab changes so we auto-inject when navigating the SPA
+  chrome.tabs.onActivated.addListener(() => {
+    checkCurrentPage();
+  });
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (tab.active && (changeInfo.status === 'complete' || changeInfo.url)) {
+      checkCurrentPage();
+    }
+  });
   
   console.log('[SidePanel] Checking AI availability');
   const aiStatus = await chrome.runtime.sendMessage({ action: 'checkAI' });
@@ -76,11 +86,41 @@ async function checkCurrentPage() {
         response.isUpworkSearch 
           ? `Ready — scrape this page` 
           : 'Page loaded. Click Scrape to start.';
+      return; // Success, exit
     }
   } catch (err) {
-    console.warn('[SidePanel] Ping failed:', err.message);
-    document.getElementById('scrape-hint').textContent = 'Navigate to an Upwork job search page first';
+    console.warn('[SidePanel] Ping failed. Attempting to inject scripts dynamically:', err.message);
   }
+
+  // If ping fails or doesn't return active, try programmatically injecting the scripts.
+  if (tab.url && tab.url.includes('upwork.com')) {
+    try {
+      console.log('[SidePanel] Injecting scripts programmatically into tab', tab.id);
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: [
+          'content/scraper.js',
+          'content/highlighter.js',
+          'content/content-main.js'
+        ]
+      });
+      // Retry ping
+      const retryResponse = await chrome.tabs.sendMessage(tab.id, { action: 'ping' });
+      if (retryResponse && retryResponse.active) {
+        document.getElementById('btn-scrape').disabled = false;
+        document.getElementById('btn-scrape-only').disabled = false;
+        document.getElementById('scrape-hint').textContent = 
+          retryResponse.isUpworkSearch 
+            ? `Ready — scrape this page` 
+            : 'Page loaded. Click Scrape to start.';
+        return; // Success after injection, exit
+      }
+    } catch (injectErr) {
+      console.error('[SidePanel] Failed to inject scripts:', injectErr);
+    }
+  }
+
+  document.getElementById('scrape-hint').textContent = 'Navigate to an Upwork job search page first';
 }
 
 async function handleScrape() {
