@@ -4,6 +4,7 @@ Welcome to this repository! This repository includes a collection of customized 
 
 Currently, the repository contains:
 - **[Upwork Keyword Finder + Job Scraper](./upwork-keyword-finder):** A handy extension to analyze keywords in Upwork jobs and easily scrape job data.
+- **[Personal Assistant](./personal-assistant):** Your daily productivity companion — features a full-fledged notes keeper, scheduled task reminders, and a right-click web clipper wrapped securely in Chrome's native Side Panel.
 
 ## 🚀 Installation Guide
 

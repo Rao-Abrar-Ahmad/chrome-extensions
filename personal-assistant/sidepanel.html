@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Personal Assistant</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+
+<body>
+  <!-- Tab Bar -->
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-tab="notes">📋 Notes</button>
+    <button class="tab-btn" data-tab="reminders">🔔 Reminders</button>
+  </nav>
+
+  <!-- Main Content Area -->
+  <main class="content-area">
+    <!-- NOTES TAB CONTENT -->
+    <section id="notes-tab" class="tab-content active">
+
+      <!-- Notes List View -->
+      <div id="notes-list-view" class="view active">
+        <div class="search-container">
+          <input type="text" id="search-input" placeholder="🔍 Search notes...">
+        </div>
+        <div id="notes-list" class="list-container">
+          <!-- Note cards will be injected here -->
+        </div>
+        <button id="btn-new-note" class="fab">+ New Note</button>
+      </div>
+
+      <!-- Note Detail / Edit View -->
+      <div id="note-detail-view" class="view">
+        <div class="top-bar">
+          <button id="btn-back" class="icon-btn">← Back</button>
+          <div class="top-bar-right">
+            <span id="save-status" class="save-status"></span>
+            <button id="btn-reminder" class="icon-btn" title="Set Reminder">🔔</button>
+          </div>
+        </div>
+        <input type="text" id="note-title-input" class="large-input" placeholder="Note Title">
+        <textarea id="note-body-input" class="flexible-textarea" placeholder="Start typing..."></textarea>
+
+        <div class="action-bar">
+          <button id="btn-delete" class="action-btn">🗑️ Delete</button>
+          <button id="btn-pin" class="action-btn">📌 Pin</button>
+        </div>
+
+        <!-- Reminder Modal (Hidden by Default) -->
+        <div id="reminder-modal" class="modal">
+          <div class="modal-content">
+            <h3>Set Reminder</h3>
+            <input type="datetime-local" id="reminder-datetime" class="std-input">
+            <div class="modal-actions">
+              <button id="btn-cancel-reminder-modal">Cancel</button>
+              <button id="btn-save-reminder" class="primary">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- REMINDERS TAB CONTENT -->
+    <section id="reminders-tab" class="tab-content">
+      <div id="reminders-list-view" class="view active">
+        <h3>Upcoming reminders</h3>
+        <div id="reminders-list" class="list-container">
+          <!-- Reminder cards injected here -->
+        </div>
+        <button id="btn-new-task" class="fab">+ Add Task</button>
+      </div>
+
+      <!-- Add Task View -->
+      <div id="task-detail-view" class="view">
+        <div class="top-bar">
+          <button id="btn-back-task" class="icon-btn">← Back</button>
+        </div>
+        <input type="text" id="task-title-input" class="std-input" placeholder="Task Title">
+        <textarea id="task-desc-input" class="std-input" placeholder="Description (optional)"></textarea>
+
+        <label>Scheduled For:</label>
+        <input type="datetime-local" id="task-datetime" class="std-input">
+
+        <label>Recurrence:</label>
+        <select id="task-recurrence" class="std-input">
+          <option value="none">Once</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+        </select>
+
+        <div class="action-bar single-action">
+          <button id="btn-save-task" class="primary full-width">Save Task</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Global Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Script Modules -->
+  <script type="module" src="sidepanel.js"></script>
+</body>
+
+</html>
