@@ -2,7 +2,9 @@ const STORAGE_KEYS = {
   NOTES: "pa_notes",
   REMINDERS: "pa_reminders",
   SETTINGS: "pa_settings",
-  PENDING_ACTION: "pa_pending_action"
+  PENDING_ACTION: "pa_pending_action",
+  MEETING_SESSIONS: "pa_meeting_sessions",
+  MEETING_SETTINGS: "pa_meeting_settings"
 };
 
 export async function getNotes() {
@@ -50,4 +52,32 @@ export async function setPendingAction(action) {
 
 export async function clearPendingAction() {
   await chrome.storage.local.remove(STORAGE_KEYS.PENDING_ACTION);
+}
+
+// Meeting Settings
+export async function getMeetingSettings() {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.MEETING_SETTINGS);
+  return result[STORAGE_KEYS.MEETING_SETTINGS] || {
+    openrouterApiKey: '',
+    aiModel: 'meta-llama/llama-3.1-8b-instruct:free',
+    autoSuggest: true,
+    firstRunComplete: false
+  };
+}
+
+export async function setMeetingSettings(settings) {
+  await chrome.storage.local.set({ [STORAGE_KEYS.MEETING_SETTINGS]: settings });
+}
+
+// Meeting Sessions
+export async function getMeetingSessions() {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.MEETING_SESSIONS);
+  return result[STORAGE_KEYS.MEETING_SESSIONS] || [];
+}
+
+export async function saveMeetingSession(session) {
+  const sessions = await getMeetingSessions();
+  sessions.unshift(session);
+  if (sessions.length > 50) sessions.splice(50);
+  await chrome.storage.local.set({ [STORAGE_KEYS.MEETING_SESSIONS]: sessions });
 }

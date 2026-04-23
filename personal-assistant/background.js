@@ -124,3 +124,49 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       }
   })();
 });
+
+// tabCapture and offscreen management
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'START_MEETING_CAPTURE') {
+    const { tabId } = message;
+
+    chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, async (streamId) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+
+      // Create Offscreen Document if it doesn't exist
+      const offscreenUrl = chrome.runtime.getURL('offscreen.html');
+      const existing = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [offscreenUrl]
+      });
+
+      if (existing.length === 0) {
+        await chrome.offscreen.createDocument({
+          url: offscreenUrl,
+          reasons: ['USER_MEDIA'],
+          justification: 'Capture tab audio and microphone for meeting transcription'
+        });
+      }
+
+      // Forward the stream ID to the Offscreen Document
+      chrome.runtime.sendMessage({
+        type: 'OFFSCREEN_START_CAPTURE',
+        streamId: streamId
+      });
+
+      sendResponse({ success: true });
+    });
+
+    return true; // Keep async channel open
+  }
+
+  if (message.type === 'STOP_MEETING_CAPTURE') {
+    chrome.runtime.sendMessage({ type: 'OFFSCREEN_STOP_CAPTURE' });
+    chrome.offscreen.closeDocument().catch(() => {});
+    sendResponse({ success: true });
+    return true;
+  }
+});

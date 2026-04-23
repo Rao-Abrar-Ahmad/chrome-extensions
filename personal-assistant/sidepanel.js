@@ -1,4 +1,8 @@
-import { getNotes, setNotes, updateNote, deleteNote, getReminders, setReminders, getPendingAction, clearPendingAction } from './modules/storage.js';
+import { getNotes, setNotes, updateNote, deleteNote, getReminders, setReminders, getPendingAction, clearPendingAction, getMeetingSettings, setMeetingSettings, saveMeetingSession } from './modules/storage.js';
+import { scheduleReminder, cancelReminder } from './modules/scheduler.js';
+import { detectMeetingTab, detectQuestion } from './modules/meeting.js';
+import { streamAIResponse, buildSystemPrompt, buildUserPrompt } from './modules/ai.js';
+import { formatSessionAsNote } from './modules/transcript.js';
 import { scheduleReminder, cancelReminder } from './modules/scheduler.js';
 
 // ---- STATE ----
@@ -57,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
   renderNotes();
   renderReminders();
   processPendingActions();
+  setupMeetingEvents();
 });
 
 async function processPendingActions() {
@@ -547,3 +552,255 @@ window.addEventListener('beforeunload', () => {
         if(currentNote) saveCurrentNote();
     }
 });
+
+/* ==== MEETING TAB ==== */
+let activeMeetingSession = null;
+let autoScrollEnabled = true;
+
+async function setupMeetingEvents() {
+  const mEls = {
+    settingsBtn: document.getElementById('meeting-settings-btn'),
+    settingsOverlay: document.getElementById('meeting-settings-overlay'),
+    apiKeyInput: document.getElementById('meeting-api-key'),
+    aiModelSelect: document.getElementById('meeting-ai-model'),
+    autoSuggestCheck: document.getElementById('meeting-auto-suggest'),
+    settingsSave: document.getElementById('meeting-settings-save'),
+    
+    idleView: document.getElementById('meeting-idle-view'),
+    activeView: document.getElementById('meeting-active-view'),
+    saveView: document.getElementById('meeting-save-view'),
+    
+    contextInput: document.getElementById('meeting-context'),
+    platformStatus: document.getElementById('meeting-platform-status'),
+    startBtn: document.getElementById('meeting-start-btn'),
+    
+    stopBtn: document.getElementById('meeting-stop-btn'),
+    suggestBtn: document.getElementById('meeting-suggest-btn'),
+    transcript: document.getElementById('transcript'),
+    aiCardsContainer: document.getElementById('ai-cards-container'),
+    scrollBtn: document.getElementById('scroll-to-bottom-btn'),
+    timerValue: document.getElementById('meeting-timer'),
+    
+    saveTitle: document.getElementById('meeting-save-title'),
+    saveDuration: document.getElementById('save-duration-text'),
+    saveNoteBtn: document.getElementById('meeting-save-btn'),
+    discardBtn: document.getElementById('meeting-discard-btn')
+  };
+
+  // Load Settings
+  const settings = await getMeetingSettings();
+  mEls.apiKeyInput.value = settings.openrouterApiKey;
+  mEls.aiModelSelect.value = settings.aiModel;
+  mEls.autoSuggestCheck.checked = settings.autoSuggest;
+
+  mEls.settingsBtn.addEventListener('click', () => {
+    mEls.settingsOverlay.style.display = mEls.settingsOverlay.style.display === 'none' ? 'block' : 'none';
+  });
+
+  mEls.settingsSave.addEventListener('click', async () => {
+    settings.openrouterApiKey = mEls.apiKeyInput.value;
+    settings.aiModel = mEls.aiModelSelect.value;
+    settings.autoSuggest = mEls.autoSuggestCheck.checked;
+    await setMeetingSettings(settings);
+    mEls.settingsOverlay.style.display = 'none';
+    showToast('Settings saved');
+  });
+
+  // Switch to meeting tab hook
+  document.querySelector('.tab-btn[data-tab="meeting"]').addEventListener('click', async () => {
+    if (!activeMeetingSession) {
+      const match = await detectMeetingTab();
+      if (match) {
+        mEls.platformStatus.innerHTML = `✅ ${match.platform} detected<br/><span style="font-family: monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:inline-block; max-width: 100%; border-top: 1px dashed var(--color-border); padding-top: 4px; margin-top: 4px;">${match.tab.title || ''}</span>`;
+        mEls.platformStatus.dataset.tabId = match.tab.id;
+        mEls.platformStatus.dataset.platformType = match.platform;
+      } else {
+        mEls.platformStatus.innerHTML = `⚠️ No active meeting detected. Open a meeting in another tab.`;
+        mEls.platformStatus.dataset.tabId = "";
+        mEls.platformStatus.dataset.platformType = "Unknown";
+      }
+    }
+  });
+
+  // Start Meeting
+  mEls.startBtn.addEventListener('click', () => {
+    const tabId = parseInt(mEls.platformStatus.dataset.tabId);
+    if (!tabId) {
+      alert("Cannot start: No meeting tab detected.");
+      return;
+    }
+
+    activeMeetingSession = {
+      id: `meeting_${Date.now()}`,
+      title: '',
+      platform: mEls.platformStatus.dataset.platformType || 'Unknown',
+      context: mEls.contextInput.value,
+      startedAt: Date.now(),
+      transcript: [],
+      aiResponses: []
+    };
+
+    mEls.idleView.style.display = 'none';
+    mEls.activeView.style.display = 'flex';
+    mEls.transcript.innerHTML = '<div id="ai-cards-container" style="display: flex; flex-direction: column; gap: 8px;"></div>';
+    
+    // Start Timer
+    const tInterval = setInterval(() => {
+      if(!activeMeetingSession) { clearInterval(tInterval); return; }
+      const diff = Math.floor((Date.now() - activeMeetingSession.startedAt) / 1000);
+      const h = Math.floor(diff/3600).toString().padStart(2,'0');
+      const m = Math.floor((diff%3600)/60).toString().padStart(2,'0');
+      const s = Math.floor(diff%60).toString().padStart(2,'0');
+      mEls.timerValue.textContent = `${h}:${m}:${s}`;
+    }, 1000);
+
+    chrome.runtime.sendMessage({ type: 'START_MEETING_CAPTURE', tabId }, (res) => {
+      if(!res.success) {
+        alert("Failed to start capture: " + res.error);
+        stopMeetingSession();
+      }
+    });
+  });
+
+  // Stop Meeting
+  mEls.stopBtn.addEventListener('click', stopMeetingSession);
+  
+  function stopMeetingSession() {
+      chrome.runtime.sendMessage({ type: 'STOP_MEETING_CAPTURE' });
+      if(!activeMeetingSession) return;
+      
+      activeMeetingSession.endedAt = Date.now();
+      mEls.activeView.style.display = 'none';
+      mEls.saveView.style.display = 'flex';
+      
+      const diff = Math.floor((activeMeetingSession.endedAt - activeMeetingSession.startedAt) / 1000);
+      mEls.saveDuration.textContent = `${Math.floor(diff/60)}m ${diff%60}s`;
+      mEls.saveTitle.value = `Meeting - ${new Date().toLocaleString([], {dateStyle:'short', timeStyle:'short'})}`;
+  }
+
+  // Save or Discard
+  mEls.saveNoteBtn.addEventListener('click', async () => {
+    activeMeetingSession.title = mEls.saveTitle.value;
+    const note = formatSessionAsNote(activeMeetingSession);
+    
+    const notes = await getNotes();
+    notes.unshift(note);
+    await setNotes(notes);
+    
+    // Switch to notes tab immediately
+    resetMeetingTab();
+    document.querySelector('[data-tab="notes"]').click();
+  });
+
+  mEls.discardBtn.addEventListener('click', () => {
+      resetMeetingTab();
+  });
+
+  function resetMeetingTab() {
+      activeMeetingSession = null;
+      mEls.saveView.style.display = 'none';
+      mEls.activeView.style.display = 'none';
+      mEls.idleView.style.display = 'flex';
+      mEls.contextInput.value = '';
+  }
+
+  // Live Transcript Listener
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === 'TRANSCRIPT_UPDATE' && activeMeetingSession) {
+      renderTranscriptLine(msg);
+      if(msg.isFinal) {
+          activeMeetingSession.transcript.push(msg);
+          if(msg.speaker === 'them' && detectQuestion(msg.text) && settings.autoSuggest) {
+              triggerAISuggestion(msg.text);
+          }
+      }
+    }
+  });
+
+  function renderTranscriptLine({ speaker, text, isFinal, timestamp }) {
+    const label = speaker === 'you' ? 'You' : 'Them';
+    const timeStr = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    if (!isFinal) {
+      let interimEl = document.getElementById(`interim-${speaker}`);
+      if (!interimEl) {
+        interimEl = document.createElement('div');
+        interimEl.id = `interim-${speaker}`;
+        interimEl.className = 'transcript-line interim';
+        mEls.transcript.insertBefore(interimEl, mEls.transcript.querySelector('#ai-cards-container'));
+      }
+      interimEl.textContent = `${label}: ${text}`;
+    } else {
+      let interimEl = document.getElementById(`interim-${speaker}`);
+      if (interimEl) interimEl.remove();
+
+      const line = document.createElement('div');
+      line.className = 'transcript-line final';
+      line.innerHTML = `<span class="ts-time">${timeStr}</span><span class="ts-speaker ${speaker}">${label}</span><span class="ts-text">${text}</span>`;
+      mEls.transcript.insertBefore(line, mEls.transcript.querySelector('#ai-cards-container'));
+      if(autoScrollEnabled) scrollTranscriptDown();
+    }
+  }
+
+  function scrollTranscriptDown() {
+      mEls.transcript.scrollTop = mEls.transcript.scrollHeight;
+  }
+  
+  mEls.transcript.addEventListener('scroll', () => {
+      const atBottom = mEls.transcript.scrollHeight - mEls.transcript.scrollTop - mEls.transcript.clientHeight < 50;
+      autoScrollEnabled = atBottom;
+      mEls.scrollBtn.style.display = autoScrollEnabled ? 'none' : 'block';
+  });
+
+  mEls.scrollBtn.addEventListener('click', () => {
+      autoScrollEnabled = true;
+      scrollTranscriptDown();
+  });
+
+  mEls.suggestBtn.addEventListener('click', () => {
+     if(!activeMeetingSession || activeMeetingSession.transcript.length === 0) return;
+     triggerAISuggestion("Suggest a helpful insight or response.");
+  });
+
+  async function triggerAISuggestion(questionText) {
+      if(!settings.openrouterApiKey) {
+          showToast("Add API Key in settings for AI suggestions");
+          return;
+      }
+      
+      const cardId = Date.now().toString();
+      const card = document.createElement('div');
+      card.className = 'ai-card';
+      card.innerHTML = `
+        <div class="ai-card-question">💬 ${questionText}</div>
+        <div class="ai-response-text" id="ai-res-${cardId}"></div><div class="ai-card-cursor" id="ai-cur-${cardId}">▌</div>
+      `;
+      mEls.transcript.querySelector('#ai-cards-container').appendChild(card);
+      if(autoScrollEnabled) scrollTranscriptDown();
+
+      const contextLines = activeMeetingSession.transcript.slice(-8).map(t => `${t.speaker === 'you'?'You':'Them'}: ${t.text}`);
+      const sysPrompt = buildSystemPrompt(activeMeetingSession.context);
+      const usrPrompt = buildUserPrompt(contextLines, questionText);
+      const resEl = card.querySelector(`#ai-res-${cardId}`);
+      const curEl = card.querySelector(`#ai-cur-${cardId}`);
+      
+      let fullResponse = '';
+      try {
+          for await (const token of streamAIResponse(usrPrompt, sysPrompt, settings.openrouterApiKey, settings.aiModel)) {
+              fullResponse += token;
+              resEl.textContent = fullResponse;
+              if(autoScrollEnabled) scrollTranscriptDown();
+          }
+      } catch (e) {
+          resEl.textContent = "Error: " + e.message;
+      }
+      
+      curEl.style.display = 'none';
+      if(fullResponse) {
+          activeMeetingSession.aiResponses.push({
+              question: questionText,
+              response: fullResponse
+          });
+      }
+  }
+}

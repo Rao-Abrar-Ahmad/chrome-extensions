@@ -13,6 +13,7 @@
   <nav class="tab-bar">
     <button class="tab-btn active" data-tab="notes">📋 Notes</button>
     <button class="tab-btn" data-tab="reminders">🔔 Reminders</button>
+    <button class="tab-btn" data-tab="meeting">🎙️ Meeting</button>
   </nav>
 
   <!-- Main Content Area -->
@@ -94,6 +95,71 @@
         <div class="action-bar single-action">
           <button id="btn-save-task" class="primary full-width">Save Task</button>
         </div>
+      </div>
+    </section>
+
+    <!-- MEETING TAB CONTENT -->
+    <section id="meeting-tab" class="tab-content" style="display: none; height: 100%;">
+      <!-- Headers & Settings -->
+      <div class="meeting-header" style="padding: 16px; border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center;">
+        <h2 style="margin:0; font-size: 16px; color: var(--color-text-primary);">🎙️ Meeting Assistant</h2>
+        <button id="meeting-settings-btn" style="background: none; border: none; cursor: pointer; filter: grayscale(100%); transition: filter 0.2s;">⚙️</button>
+      </div>
+
+      <!-- Settings Overlay (Hidden) -->
+      <div id="meeting-settings-overlay" style="display: none; padding: 16px;">
+        <h3 style="margin-top: 0; padding: 0 0 16px 0;">Settings</h3>
+        <label>OpenRouter API Key:</label>
+        <input type="password" id="meeting-api-key" class="std-input" style="margin-bottom: 8px;">
+        <label>AI Model:</label>
+        <select id="meeting-ai-model" class="std-input" style="margin-bottom: 8px;">
+          <option value="meta-llama/llama-3.1-8b-instruct:free">Llama 3.1 8B (Free)</option>
+          <option value="google/gemma-2-9b-it:free">Gemma 2 9B (Free)</option>
+        </select>
+        <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; padding-bottom: 16px;">
+          <input type="checkbox" id="meeting-auto-suggest"> Auto-Suggest (Streaming AI on Questions)
+        </label>
+        <div style="margin-top: 16px;">
+           <button id="meeting-settings-save" class="primary full-width">Save Settings</button>
+        </div>
+      </div>
+
+      <!-- Pre-Session View -->
+      <div id="meeting-idle-view" style="padding: 16px; flex-direction: column; gap: 16px; display: flex;">
+         <div>
+           <label style="padding: 0 0 8px 0; display: block;">Meeting context (optional)</label>
+           <textarea id="meeting-context" class="std-input" rows="2" placeholder="e.g. Shopify client onboarding" style="margin: 0; border: 1px solid var(--color-border-strong);"></textarea>
+         </div>
+         <div id="meeting-platform-status" style="font-size: 13px; color: var(--color-text-secondary); padding: 8px; background: var(--color-bg-tertiary); border-radius: var(--radius-md);">
+           Checking active tabs...
+         </div>
+         <button id="meeting-start-btn" class="primary full-width">🎙️ Start Listening</button>
+      </div>
+
+      <!-- Active Session View -->
+      <div id="meeting-active-view" style="display: none; flex: 1; flex-direction: column; overflow: hidden;">
+         <div class="active-header" style="display: flex; justify-content: space-between; padding: 10px 16px; background: var(--color-bg-secondary); font-size: 13px; align-items: center; border-bottom: 1px solid var(--color-border);">
+            <div style="display: flex; align-items: center; gap: 8px;"><div class="live-dot"></div> LIVE <span id="meeting-timer" style="font-family: monospace;">00:00:00</span></div>
+            <button id="meeting-stop-btn" style="cursor:pointer; color: var(--color-danger); border: none; background: none; font-weight: 600;">⏹ Stop</button>
+         </div>
+         <div style="padding: 12px 16px 4px 16px;"><button id="meeting-suggest-btn" class="suggest-btn">💡 Suggest</button></div>
+         
+         <div class="transcript-area" id="transcript">
+            <div id="ai-cards-container" style="display: flex; flex-direction: column; gap: 8px;"></div>
+         </div>
+         <button id="scroll-to-bottom-btn" class="scroll-to-bottom-btn">⬇ Scroll to bottom</button>
+      </div>
+
+      <!-- Save Prompt View -->
+      <div id="meeting-save-view" style="display: none; padding: 16px; flex-direction: column; gap: 12px;">
+         <h3 style="margin: 0; padding: 0;">Session ended</h3>
+         <p style="margin: 0; color: var(--color-text-secondary); font-size: 13px;">Duration: <span id="save-duration-text" style="font-family: monospace;"></span></p>
+         <label style="padding: 0;">Title:</label>
+         <input type="text" id="meeting-save-title" class="std-input" style="margin:0;">
+         <div style="display:flex; gap: 8px; margin-top: 16px;">
+            <button id="meeting-save-btn" class="primary" style="flex: 1; padding: 12px;">Save Note</button>
+            <button id="meeting-discard-btn" style="flex: 1; padding: 12px;">Discard</button>
+         </div>
       </div>
     </section>
   </main>

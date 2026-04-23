@@ -4,7 +4,11 @@
   "version": "1.0.0",
   "description": "Your daily productivity companion — notes, reminders, and daily tasks in Chrome's side panel.",
 
-  "permissions": ["storage", "alarms", "notifications", "sidePanel", "contextMenus"],
+  "permissions": ["storage", "alarms", "notifications", "sidePanel", "contextMenus", "tabCapture", "offscreen"],
+
+  "host_permissions": [
+    "https://openrouter.ai/*"
+  ],
 
   "action": {
     "default_title": "Open Personal Assistant",
