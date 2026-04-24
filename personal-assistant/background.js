@@ -129,12 +129,16 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'START_MEETING_CAPTURE') {
     const { tabId } = message;
+    console.log("[Background] Received START_MEETING_CAPTURE for tabId:", tabId);
 
     chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, async (streamId) => {
       if (chrome.runtime.lastError) {
+        console.error("[Background] tabCapture.getMediaStreamId Error:", chrome.runtime.lastError.message);
         sendResponse({ success: false, error: chrome.runtime.lastError.message });
         return;
       }
+      
+      console.log("[Background] Successfully generated tab streamId:", streamId);
 
       // Create Offscreen Document if it doesn't exist
       const offscreenUrl = chrome.runtime.getURL('offscreen.html');
@@ -143,20 +147,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         documentUrls: [offscreenUrl]
       });
 
+      console.log("[Background] Existing offscreen contexts found:", existing.length);
       if (existing.length === 0) {
+        console.log("[Background] Creating new Offscreen Document...");
         await chrome.offscreen.createDocument({
           url: offscreenUrl,
           reasons: ['USER_MEDIA'],
           justification: 'Capture tab audio and microphone for meeting transcription'
         });
+        console.log("[Background] Offscreen Document created. Waiting for initialization...");
+        // Wait for offscreen document to fully load
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      // Forward the stream ID to the Offscreen Document
-      chrome.runtime.sendMessage({
-        type: 'OFFSCREEN_START_CAPTURE',
-        streamId: streamId
-      });
+      // Forward the stream ID to the Offscreen Document with retry logic
+      console.log("[Background] Forwarding streamId to Offscreen Document via OFFSCREEN_START_CAPTURE");
+      
+      let retries = 3;
+      let success = false;
+      while (retries > 0 && !success) {
+        try {
+          await chrome.runtime.sendMessage({
+            type: 'OFFSCREEN_START_CAPTURE',
+            streamId: streamId
+          });
+          success = true;
+          console.log("[Background] Message sent successfully to offscreen document");
+        } catch (error) {
+          retries--;
+          console.warn(`[Background] Failed to send message to offscreen (${retries} retries left):`, error.message);
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+        }
+      }
 
+      if (!success) {
+        console.error("[Background] Failed to communicate with offscreen document after retries");
+        sendResponse({ success: false, error: "Could not communicate with offscreen document" });
+        return;
+      }
+
+      console.log("[Background] START_MEETING_CAPTURE flow complete. Success.");
       sendResponse({ success: true });
     });
 
@@ -164,8 +196,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'STOP_MEETING_CAPTURE') {
+    console.log("[Background] Received STOP_MEETING_CAPTURE. Closing Offscreen Document.");
     chrome.runtime.sendMessage({ type: 'OFFSCREEN_STOP_CAPTURE' });
-    chrome.offscreen.closeDocument().catch(() => {});
+    chrome.offscreen.closeDocument().catch(e => console.log("[Background] closeDocument Error (ignorable):", e));
     sendResponse({ success: true });
     return true;
   }

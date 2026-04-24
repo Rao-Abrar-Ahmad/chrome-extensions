@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upwork Jobs Analytics Dashboard</title>
+    <link rel="stylesheet" href="analytics.css">
+    <script src="../lib/chart.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>Jobs Analytics Dashboard</h1>
+                <p style="color: var(--text-muted)">Analyzing 7 days of scraped job market data</p>
+            </div>
+            <div id="last-updated" style="font-size: 0.8rem; color: var(--text-muted)"></div>
+        </header>
+
+        <!-- KPI Section -->
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <span class="kpi-value" id="kpi-total-jobs">-</span>
+                <span class="kpi-label">Unique Jobs</span>
+            </div>
+            <div class="kpi-card">
+                <span class="kpi-value" id="kpi-avg-proposals">-</span>
+                <span class="kpi-label">Avg Proposals</span>
+            </div>
+            <div class="kpi-card">
+                <span class="kpi-value" id="kpi-total-budget">-</span>
+                <span class="kpi-label">Analyzed Budget</span>
+            </div>
+            <div class="kpi-card">
+                <span class="kpi-value" id="kpi-top-day">-</span>
+                <span class="kpi-label">Busiest Day</span>
+            </div>
+        </div>
+
+        <!-- Filters Section -->
+        <div class="card filter-bar">
+            <div class="filter-group">
+                <label for="filter-day">Day of Week</label>
+                <select id="filter-day">
+                    <option value="all">All Days</option>
+                    <option value="0">Sunday</option>
+                    <option value="1">Monday</option>
+                    <option value="2">Tuesday</option>
+                    <option value="3">Wednesday</option>
+                    <option value="4">Thursday</option>
+                    <option value="5">Friday</option>
+                    <option value="6">Saturday</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="filter-hour">Time Window</label>
+                <select id="filter-hour">
+                    <option value="all">All Day</option>
+                    <option value="morning">Morning (6AM - 12PM)</option>
+                    <option value="afternoon">Afternoon (12PM - 6PM)</option>
+                    <option value="evening">Evening (6PM - 12AM)</option>
+                    <option value="night">Night (12AM - 6AM)</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="search-jobs">Search Keywords</label>
+                <input type="text" id="search-jobs" placeholder="e.g. React, Shopify...">
+            </div>
+            <div class="filter-group" style="flex: 0 0 auto;">
+                <label>&nbsp;</label>
+                <button id="btn-reset-filters" class="secondary-btn">Reset</button>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-row">
+            <div class="card">
+                <div class="card-title">Jobs Posted Over Time</div>
+                <canvas id="timeChart"></canvas>
+            </div>
+            <div class="card">
+                <div class="card-title">Budget Distribution</div>
+                <canvas id="budgetChart"></canvas>
+            </div>
+        </div>
+
+        <div class="charts-row">
+            <div class="card">
+                <div class="card-title">Top Required Skills</div>
+                <canvas id="skillsChart"></canvas>
+            </div>
+            <div class="card">
+                <div class="card-title">Job Type Distribution</div>
+                <canvas id="typeChart"></canvas>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 3rem;">
+            <div class="card-title">
+                Competition Heatmap
+                <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted)">Lower Opacity = Lower Competition (Avg Proposals)</span>
+            </div>
+            <div class="heat-map-container" id="heatMap">
+                <!-- Javascript will inject heatmap rows -->
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">
+                Consolidated Job Feed
+                <span id="job-count-display" style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted)">Showing all jobs</span>
+            </div>
+            <div class="suggestion-box" id="optimizationBox" style="margin-bottom: 2rem;">
+                <div class="suggestion-title">✨ Recommended Application Window</div>
+                <p id="suggestionText">Loading insights...</p>
+            </div>
+            
+            <div id="job-feed" class="job-feed">
+                <!-- Premium Job Cards will be injected here -->
+                <div class="loading-placeholder">Loading job data...</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="analytics.js"></script>
+</body>
+</html>

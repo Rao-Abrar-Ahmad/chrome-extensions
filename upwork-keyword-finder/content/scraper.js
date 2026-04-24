@@ -42,17 +42,26 @@ function extractJobFromTile(tile, position, scrapedAt) {
   
   let postedAt = scrapedAt;
   if (postedRelative) {
-    const match = postedRelative.match(/(\d+)\s+(minute|hour|day|week|month)s?\s+ago/i);
-    if (match) {
-        const amount = parseInt(match[1]);
-        const unit = match[2].toLowerCase();
+    const lower = postedRelative.toLowerCase();
+    if (lower.includes('just now')) {
+        postedAt = scrapedAt;
+    } else if (lower.includes('yesterday')) {
         const pastDate = new Date(scrapedAt);
-        if (unit.startsWith('minute')) pastDate.setMinutes(pastDate.getMinutes() - amount);
-        else if (unit.startsWith('hour')) pastDate.setHours(pastDate.getHours() - amount);
-        else if (unit.startsWith('day')) pastDate.setDate(pastDate.getDate() - amount);
-        else if (unit.startsWith('week')) pastDate.setDate(pastDate.getDate() - (amount * 7));
-        else if (unit.startsWith('month')) pastDate.setMonth(pastDate.getMonth() - amount);
+        pastDate.setDate(pastDate.getDate() - 1);
         postedAt = pastDate.toISOString();
+    } else {
+        const match = postedRelative.match(/(\d+)\s+(minute|hour|day|week|month)s?\s+ago/i);
+        if (match) {
+            const amount = parseInt(match[1]);
+            const unit = match[2].toLowerCase();
+            const pastDate = new Date(scrapedAt);
+            if (unit.startsWith('minute')) pastDate.setMinutes(pastDate.getMinutes() - amount);
+            else if (unit.startsWith('hour')) pastDate.setHours(pastDate.getHours() - amount);
+            else if (unit.startsWith('day')) pastDate.setDate(pastDate.getDate() - amount);
+            else if (unit.startsWith('week')) pastDate.setDate(pastDate.getDate() - (amount * 7));
+            else if (unit.startsWith('month')) pastDate.setMonth(pastDate.getMonth() - amount);
+            postedAt = pastDate.toISOString();
+        }
     }
   }
   

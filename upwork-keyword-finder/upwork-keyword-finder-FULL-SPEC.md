@@ -1,5 +1,4 @@
-# Upwork Keyword Finder — Chrome Extension
-## Complete Build Specification v2.0
+## Complete Build Specification v2.1
 ### Agent-Ready Documentation (for Claude Code or any AI agent)
 
 ---
@@ -28,9 +27,10 @@
 15. [Highlight Engine](#15-highlight-engine)
 16. [Data Flow — Complete Picture](#16-data-flow--complete-picture)
 17. [Chrome Built-in AI Setup Requirements](#17-chrome-built-in-ai-setup-requirements)
-18. [Phase-by-Phase Build Plan](#18-phase-by-phase-build-plan)
-19. [Known Challenges & Solutions](#19-known-challenges--solutions)
-20. [Quick Reference — All Selectors](#20-quick-reference--all-selectors)
+19. [Data Consolidation Workflow](#19-data-consolidation-workflow)
+20. [Analytics Dashboard Architecture](#20-analytics-dashboard-architecture)
+21. [Known Challenges & Solutions](#21-known-challenges--solutions)
+22. [Quick Reference — All Selectors](#22-quick-reference--all-selectors)
 
 ---
 
@@ -49,13 +49,14 @@
 
 ## 2. What Changed from v1 — Key Decisions
 
-| Feature | v1 | v2 (This Spec) |
-|---|---|---|
-| UI Surface | Popup (small modal) | **Chrome Side Panel** (full sidebar, always visible) |
-| Scraping trigger | Automatic on page load | **Manual only** — user clicks "Scrape" button |
-| Job data storage | Not stored | **Full JSON stored** in `chrome.storage.local` — every job, every scrape |
-| Data volume | Current page only | All jobs + metadata + timestamps |
-| Export | None | Export to JSON file (download to local machine) |
+| Feature | v1 | v2 | v2.1 (Latest) |
+|---|---|---|---|
+| UI Surface | Popup | Side Panel | Side Panel + **Analytics Tab** |
+| Scraping trigger | Automatic | Manual click | Manual + **SPA Navigation Support** |
+| Job data storage | Not stored | Full JSON stored | JSON + **Automated Timestamping** |
+| Data volume | Current page | All jobs + metadata | **Master Consolidated Dataset** |
+| Export | None | Export to JSON | JSON + **Visual Dashboard** |
+| Time Intelligence | Relative only | Relative only | **Absolute `postedAt` Parsing** |
 
 ---
 
@@ -1500,6 +1501,45 @@ tile.getAttribute('data-ev-page_number')             // "1"
 
 ---
 
-*Specification version 2.0 — April 2026*
+## 19. Data Consolidation Workflow
+
+To convert individual scrape exports into a unified dataset for analysis, a consolidation step is required. This is handled by `analytics/consolidate.js`.
+
+### 19.1 Workflow
+1. User scrapes jobs across multiple days/pages.
+2. User uses the "Export JSON" feature in the sidepanel to save files to the `data/` folder.
+3. User runs `node analytics/consolidate.js`.
+4. The script:
+   - Scans the `data/` directory for all `.json` files.
+   - Parses every session and every job.
+   - De-duplicates jobs based on `jobId`.
+   - Keeps the record with the most recent `scrapedAt` timestamp.
+   - Outputs a single `master-data.json` file in the `analytics/` folder.
+
+---
+
+## 20. Analytics Dashboard Architecture
+
+The dashboard is a premium visual layer built with **Chart.js v4.4.2** (localized in `lib/chart.min.js` to comply with CSP).
+
+### 20.1 Core Components
+- **`analytics.html`**: The UI structure using CSS Grid and Flexbox for a responsive, dark-mode dashboard.
+- **`analytics.css`**: Premium styling featuring Glassmorphism, fade-in animations, and custom color tokens.
+- **`analytics.js`**: The processing engine that:
+  - Fetches `master-data.json`.
+  - Calculates KPIs (Total Jobs, Avg Proposals, Total Analyzed Budget).
+  - Generates Time Series data for posting trends.
+  - Computes a **Competition Heatmap** (Day of Week vs. Hour of Day).
+  - Suggests **Optimal Application Windows** based on historical proposal density.
+  - Renders a filterable **Job Feed** with detailed job cards.
+
+### 20.2 Local Library Management
+To bypass Chrome Extension Content Security Policy (CSP), **Chart.js** must be hosted locally. 
+- Path: `lib/chart.min.js`
+- Reference: `<script src="../lib/chart.min.js"></script>`
+
+---
+
+*Specification version 2.1 — April 2026*
 *Built for: Claude Code, Cursor, or any AI coding agent*
-*All selectors verified against live Upwork HTML (shopify search results, April 2026)*
+*All selectors verified against live Upwork HTML (April 2026)*

@@ -53,6 +53,27 @@ export async function* streamAIResponse(prompt, systemPrompt, apiKey, model) {
   }
 }
 
+export async function generateResponse(question, context, apiKey) {
+  const prompt = `Meeting context: ${context}\n\nQuestion: ${question}\n\nProvide a helpful, concise answer:`;
+  
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'meta-llama/llama-3.1-8b-instruct:free',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 300,
+      temperature: 0.3
+    })
+  });
+
+  const result = await response.json();
+  return result.choices[0].message.content;
+}
+
 export function buildSystemPrompt(userContext) {
   const base = `You are an AI assistant embedded in a Chrome extension that helps a 
 professional during live business calls and meetings.

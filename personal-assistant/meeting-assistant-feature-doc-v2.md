@@ -79,7 +79,7 @@ This section consolidates every decision made. Any AI agent building this featur
 |---|---|---|
 | 1 | Meeting platforms supported | Google Meet, Zoom in browser, Teams in browser. No desktop app support needed. |
 | 2 | Audio capture method | `chrome.tabCapture` via Offscreen Document |
-| 3 | Speech-to-text method | Web Speech API (`SpeechRecognition`) — free, built into Chrome, no API key |
+| 3 | Speech-to-text method | Transformer.js with local Whisper model — free, runs in browser, no API key |
 | 4 | Whisper / paid transcription | Not used. Web Speech API is sufficient. |
 | 5 | AI backend | OpenRouter — free models only |
 | 6 | Default free AI model | `meta-llama/llama-3.1-8b-instruct:free` (OpenRouter free tier) |
@@ -169,35 +169,59 @@ This gives a properly labeled transcript showing who said what, which makes ques
 
 ## 4. Speech-to-Text — Final Strategy
 
-### Primary: Web Speech API (two parallel instances)
+### Primary: Transformer.js with Local Whisper Model
 
 **Cost:** Free  
 **API key required:** None  
-**Internet required:** Yes (Chrome sends audio to Google's speech servers)  
-**Quality:** High accuracy for clear English speech  
-**Latency:** ~1–2 seconds  
+**Internet required:** Yes for initial model download (one-time), then offline  
+**Quality:** High accuracy for clear English speech (3-7% WER depending on model size)  
+**Latency:** ~1-5 seconds per chunk (real-time with chunking)  
+
+Transformer.js runs Hugging Face Whisper models directly in the browser using WebAssembly and WebGPU. We use the quantized `openai/whisper-small` model (~250MB) for optimal accuracy vs. size balance.
+
+**Why local Whisper over Web Speech API:**
+- Fully local processing — no audio data leaves the user's device
+- Supports custom audio streams from `chrome.tabCapture`
+- Higher accuracy and multilingual support
+- No dependency on external servers
+
+**Model selection:**
+- **Primary:** `openai/whisper-small` (quantized q4) — 3.4% WER, ~250MB
+- **Fallback:** `openai/whisper-tiny` — 7.5% WER, ~75MB (for low-end devices)
+
+**Chunked processing for real-time feel:**
+Audio is recorded in 5-second chunks and transcribed immediately. This provides near-real-time transcription while managing memory and performance.
 
 ```javascript
-// Instance 1: User's microphone
-const micRecognition = new webkitSpeechRecognition();
-micRecognition.continuous = true;
-micRecognition.interimResults = true;
-micRecognition.lang = 'en-US';
+// In offscreen.js
+import { pipeline } from '@xenova/transformers';
 
-micRecognition.onresult = (event) => {
-  const transcript = getTranscriptFromEvent(event);
-  postTranscriptUpdate({ speaker: 'you', text: transcript });
-};
+// Load model once
+const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small');
 
-micRecognition.start();
+// Transcribe audio chunk
+async function transcribeAudio(audioBlob) {
+  const audioArray = await blobToFloat32Array(audioBlob);
+  const result = await transcriber(audioArray);
+  return result.text;
+}
+```
 
-// Instance 2: Tab audio (remote participants)
-const tabRecognition = new webkitSpeechRecognition();
-tabRecognition.continuous = true;
-tabRecognition.interimResults = true;
-tabRecognition.lang = 'en-US';
+### Dual transcription (You vs. Them)
 
-// Assign tab audio stream (via AudioContext routing)
+Run two parallel transcription pipelines:
+- **You:** Microphone audio → transcribes user's speech
+- **Them:** Tab audio → transcribes meeting participants
+
+This provides labeled transcripts showing who said what.
+
+### Fallback: if model fails to load
+
+If the Whisper model cannot be loaded (e.g., insufficient storage), show a banner:
+
+> "Local transcription model unavailable. Please ensure at least 500MB free storage and reload the extension."
+
+No silent failures. The user must know if transcription has stopped.
 tabRecognition.onresult = (event) => {
   const transcript = getTranscriptFromEvent(event);
   postTranscriptUpdate({ speaker: 'them', text: transcript });
@@ -364,8 +388,8 @@ async function isChromeAIAvailable() {
 │  OFFSCREEN DOCUMENT (offscreen.js)         Always-running page   │
 │                                                                  │
 │  ┌─────────────────────┐  ┌──────────────────────────────────┐  │
-│  │ SpeechRecognition 1 │  │ SpeechRecognition 2              │  │
-│  │ Source: microphone  │  │ Source: tab audio (captured)     │  │
+│  │ Transformer.js      │  │ Transformer.js                   │  │
+│  │ Whisper (Mic)       │  │ Whisper (Tab Audio)              │  │
 │  │ Label: "You"        │  │ Label: "Them"                    │  │
 │  └──────────┬──────────┘  └───────────────┬──────────────────┘  │
 │             │                             │                      │
@@ -408,7 +432,7 @@ personal-assistant/
 ├── background.js               # UPDATED — tabCapture + offscreen document management
 │
 ├── offscreen.html              # NEW — hidden persistent page for audio processing
-├── offscreen.js                # NEW — dual speech recognition (mic + tab audio)
+├── offscreen.js                # NEW — dual local Whisper transcription (mic + tab audio)
 │
 ├── sidepanel.html              # UPDATED — Meeting tab added
 ├── sidepanel.js                # UPDATED — Meeting tab logic

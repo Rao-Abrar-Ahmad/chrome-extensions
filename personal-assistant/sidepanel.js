@@ -1,14 +1,16 @@
 import { getNotes, setNotes, updateNote, deleteNote, getReminders, setReminders, getPendingAction, clearPendingAction, getMeetingSettings, setMeetingSettings, saveMeetingSession } from './modules/storage.js';
 import { scheduleReminder, cancelReminder } from './modules/scheduler.js';
 import { detectMeetingTab, detectQuestion } from './modules/meeting.js';
-import { streamAIResponse, buildSystemPrompt, buildUserPrompt } from './modules/ai.js';
+import { streamAIResponse, buildSystemPrompt, buildUserPrompt, generateResponse } from './modules/ai.js';
 import { formatSessionAsNote } from './modules/transcript.js';
-import { scheduleReminder, cancelReminder } from './modules/scheduler.js';
+
 
 // ---- STATE ----
 let currentNote = null;
 let autoSaveTimer = null;
 let currentTask = null; // For standalone tasks
+let meetingContext = ''; // Accumulate transcript for AI context
+let meetingSettings = null; // Store meeting settings
 
 // ---- UI ELEMENTS ----
 const els = {
@@ -50,7 +52,27 @@ const els = {
   taskDescInput: document.getElementById('task-desc-input'),
   taskDatetime: document.getElementById('task-datetime'),
   taskRecurrence: document.getElementById('task-recurrence'),
-  btnSaveTask: document.getElementById('btn-save-task')
+  btnSaveTask: document.getElementById('btn-save-task'),
+
+  // Meeting UI
+  meetingSettingsBtn: document.getElementById('meeting-settings-btn'),
+  meetingSettingsOverlay: document.getElementById('meeting-settings-overlay'),
+  meetingApiKey: document.getElementById('meeting-api-key'),
+  meetingOpenaiKey: document.getElementById('meeting-openai-key'),
+  meetingAiModel: document.getElementById('meeting-ai-model'),
+  meetingAutoSuggest: document.getElementById('meeting-auto-suggest'),
+  meetingSettingsSave: document.getElementById('meeting-settings-save'),
+  meetingIdleView: document.getElementById('meeting-idle-view'),
+  meetingContext: document.getElementById('meeting-context'),
+  meetingPlatformStatus: document.getElementById('meeting-platform-status'),
+  meetingStartBtn: document.getElementById('meeting-start-btn'),
+  meetingActiveView: document.getElementById('meeting-active-view'),
+  meetingTimer: document.getElementById('meeting-timer'),
+  meetingStopBtn: document.getElementById('meeting-stop-btn'),
+  meetingSuggestBtn: document.getElementById('meeting-suggest-btn'),
+  transcript: document.getElementById('transcript'),
+  aiCardsContainer: document.getElementById('ai-cards-container'),
+  scrollToBottomBtn: document.getElementById('scroll-to-bottom-btn')
 };
 
 // ---- INITIALIZATION ----
@@ -589,6 +611,7 @@ async function setupMeetingEvents() {
 
   // Load Settings
   const settings = await getMeetingSettings();
+  meetingSettings = settings;
   mEls.apiKeyInput.value = settings.openrouterApiKey;
   mEls.aiModelSelect.value = settings.aiModel;
   mEls.autoSuggestCheck.checked = settings.autoSuggest;
@@ -608,13 +631,17 @@ async function setupMeetingEvents() {
 
   // Switch to meeting tab hook
   document.querySelector('.tab-btn[data-tab="meeting"]').addEventListener('click', async () => {
+    console.log("[SidePanel] Triggered switch to Meeting tab view.");
     if (!activeMeetingSession) {
+      console.log("[SidePanel] No active session. Scanning for supported Meeting URLs across tabs...");
       const match = await detectMeetingTab();
       if (match) {
+        console.log(`[SidePanel] Meeting detected! Mode: ${match.platform}, Tab ID: ${match.tab.id}`);
         mEls.platformStatus.innerHTML = `✅ ${match.platform} detected<br/><span style="font-family: monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:inline-block; max-width: 100%; border-top: 1px dashed var(--color-border); padding-top: 4px; margin-top: 4px;">${match.tab.title || ''}</span>`;
         mEls.platformStatus.dataset.tabId = match.tab.id;
         mEls.platformStatus.dataset.platformType = match.platform;
       } else {
+        console.warn("[SidePanel] No matching meeting tabs discovered.");
         mEls.platformStatus.innerHTML = `⚠️ No active meeting detected. Open a meeting in another tab.`;
         mEls.platformStatus.dataset.tabId = "";
         mEls.platformStatus.dataset.platformType = "Unknown";
@@ -623,11 +650,26 @@ async function setupMeetingEvents() {
   });
 
   // Start Meeting
-  mEls.startBtn.addEventListener('click', () => {
+  mEls.startBtn.addEventListener('click', async () => {
     const tabId = parseInt(mEls.platformStatus.dataset.tabId);
+    console.log("[SidePanel Click] Start Listening initiated! Attached Tab ID:", tabId);
     if (!tabId) {
       alert("Cannot start: No meeting tab detected.");
       return;
+    }
+
+    // Check for microphone permission explicitly via the Permissions API. 
+    // Side Panels are forbidden from executing getUserMedia directly.
+    try {
+      const micPerm = await navigator.permissions.query({ name: 'microphone' });
+      if (micPerm.state !== 'granted') {
+        chrome.tabs.create({ url: chrome.runtime.getURL('permission.html') });
+        alert("Microphone permission required! A Setup tab has been opened for you. Please click 'Allow Microphone' there, close it, and try 'Start Listening' again.");
+        return;
+      }
+      console.log("[SidePanel] Microphone status confirmed as 'granted' by the extension.");
+    } catch (err) {
+      console.warn("[SidePanel] Permissions query failed, ignoring pre-check:", err);
     }
 
     activeMeetingSession = {
@@ -654,7 +696,9 @@ async function setupMeetingEvents() {
       mEls.timerValue.textContent = `${h}:${m}:${s}`;
     }, 1000);
 
+    console.log("[SidePanel] Firing START_MEETING_CAPTURE event over cross-document messaging bridge...");
     chrome.runtime.sendMessage({ type: 'START_MEETING_CAPTURE', tabId }, (res) => {
+      console.log("[SidePanel Recv] Background Service responded to start payload:", res);
       if(!res.success) {
         alert("Failed to start capture: " + res.error);
         stopMeetingSession();
@@ -705,41 +749,50 @@ async function setupMeetingEvents() {
   }
 
   // Live Transcript Listener
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener(async (msg) => {
     if (msg.type === 'TRANSCRIPT_UPDATE' && activeMeetingSession) {
-      renderTranscriptLine(msg);
-      if(msg.isFinal) {
-          activeMeetingSession.transcript.push(msg);
-          if(msg.speaker === 'them' && detectQuestion(msg.text) && settings.autoSuggest) {
-              triggerAISuggestion(msg.text);
-          }
+      const { speaker, text, timestamp } = msg;
+      updateTranscript(speaker, text, timestamp);
+      
+      // Accumulate context
+      meetingContext += `${speaker === 'you' ? 'You' : 'Them'}: ${text}\n`;
+      
+      // Check for question and generate AI response
+      if (speaker === 'them' && detectQuestion(text) && meetingSettings?.autoSuggest) {
+        try {
+          const response = await generateResponse(text, meetingContext, meetingSettings.openrouterApiKey);
+          // Display the response
+          displayAIResponse(response);
+        } catch (error) {
+          console.error('Failed to generate AI response:', error);
+        }
       }
+    }
+
+    if (msg.type === 'CAPTURE_ERROR') {
+      console.error('[SidePanel] Capture error:', msg.message);
+      alert(`Meeting capture failed: ${msg.message}\n\nPlease check:\n1. Microphone is connected and permitted\n2. Meeting tab is still open\n3. No other app is using the microphone`);
+      stopMeetingSession();
     }
   });
 
-  function renderTranscriptLine({ speaker, text, isFinal, timestamp }) {
+  function updateTranscript(speaker, text, timestamp) {
     const label = speaker === 'you' ? 'You' : 'Them';
     const timeStr = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    if (!isFinal) {
-      let interimEl = document.getElementById(`interim-${speaker}`);
-      if (!interimEl) {
-        interimEl = document.createElement('div');
-        interimEl.id = `interim-${speaker}`;
-        interimEl.className = 'transcript-line interim';
-        mEls.transcript.insertBefore(interimEl, mEls.transcript.querySelector('#ai-cards-container'));
-      }
-      interimEl.textContent = `${label}: ${text}`;
-    } else {
-      let interimEl = document.getElementById(`interim-${speaker}`);
-      if (interimEl) interimEl.remove();
+    const line = document.createElement('div');
+    line.className = 'transcript-line final';
+    line.innerHTML = `<span class="ts-time">${timeStr}</span><span class="ts-speaker ${speaker}">${label}</span><span class="ts-text">${text}</span>`;
+    mEls.transcript.insertBefore(line, mEls.transcript.querySelector('#ai-cards-container'));
+    if(autoScrollEnabled) scrollTranscriptDown();
+  }
 
-      const line = document.createElement('div');
-      line.className = 'transcript-line final';
-      line.innerHTML = `<span class="ts-time">${timeStr}</span><span class="ts-speaker ${speaker}">${label}</span><span class="ts-text">${text}</span>`;
-      mEls.transcript.insertBefore(line, mEls.transcript.querySelector('#ai-cards-container'));
-      if(autoScrollEnabled) scrollTranscriptDown();
-    }
+  function displayAIResponse(response) {
+    const card = document.createElement('div');
+    card.className = 'ai-card';
+    card.innerHTML = `<div class="ai-icon">🤖</div><div class="ai-content">${response}</div>`;
+    mEls.aiCardsContainer.appendChild(card);
+    scrollTranscriptDown();
   }
 
   function scrollTranscriptDown() {
