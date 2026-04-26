@@ -58,8 +58,7 @@ export async function clearPendingAction() {
 export async function getMeetingSettings() {
   const result = await chrome.storage.local.get(STORAGE_KEYS.MEETING_SETTINGS);
   return result[STORAGE_KEYS.MEETING_SETTINGS] || {
-    openrouterApiKey: '',
-    aiModel: 'meta-llama/llama-3.1-8b-instruct:free',
+    aiModel: 'Xenova/gpt2',
     autoSuggest: true,
     firstRunComplete: false
   };

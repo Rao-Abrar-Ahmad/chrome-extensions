@@ -578,12 +578,12 @@ window.addEventListener('beforeunload', () => {
 /* ==== MEETING TAB ==== */
 let activeMeetingSession = null;
 let autoScrollEnabled = true;
+let lastTranscriptSpeaker = null;
 
 async function setupMeetingEvents() {
   const mEls = {
     settingsBtn: document.getElementById('meeting-settings-btn'),
     settingsOverlay: document.getElementById('meeting-settings-overlay'),
-    apiKeyInput: document.getElementById('meeting-api-key'),
     aiModelSelect: document.getElementById('meeting-ai-model'),
     autoSuggestCheck: document.getElementById('meeting-auto-suggest'),
     settingsSave: document.getElementById('meeting-settings-save'),
@@ -612,7 +612,6 @@ async function setupMeetingEvents() {
   // Load Settings
   const settings = await getMeetingSettings();
   meetingSettings = settings;
-  mEls.apiKeyInput.value = settings.openrouterApiKey;
   mEls.aiModelSelect.value = settings.aiModel;
   mEls.autoSuggestCheck.checked = settings.autoSuggest;
 
@@ -621,7 +620,6 @@ async function setupMeetingEvents() {
   });
 
   mEls.settingsSave.addEventListener('click', async () => {
-    settings.openrouterApiKey = mEls.apiKeyInput.value;
     settings.aiModel = mEls.aiModelSelect.value;
     settings.autoSuggest = mEls.autoSuggestCheck.checked;
     await setMeetingSettings(settings);
@@ -698,6 +696,9 @@ async function setupMeetingEvents() {
 
     console.log("[SidePanel] Firing START_MEETING_CAPTURE event over cross-document messaging bridge...");
     chrome.runtime.sendMessage({ type: 'START_MEETING_CAPTURE', tabId }, (res) => {
+      if (chrome.runtime.lastError) {
+        console.error('[SidePanel] Background sendMessage error:', chrome.runtime.lastError.message);
+      }
       console.log("[SidePanel Recv] Background Service responded to start payload:", res);
       if(!res.success) {
         alert("Failed to start capture: " + res.error);
@@ -710,10 +711,12 @@ async function setupMeetingEvents() {
   mEls.stopBtn.addEventListener('click', stopMeetingSession);
   
   function stopMeetingSession() {
+      console.log('[SidePanel] Sending STOP_MEETING_CAPTURE to background');
       chrome.runtime.sendMessage({ type: 'STOP_MEETING_CAPTURE' });
       if(!activeMeetingSession) return;
       
       activeMeetingSession.endedAt = Date.now();
+      console.log('[SidePanel] Meeting session stopped, transcript count:', activeMeetingSession.transcript.length);
       mEls.activeView.style.display = 'none';
       mEls.saveView.style.display = 'flex';
       
@@ -760,7 +763,7 @@ async function setupMeetingEvents() {
       // Check for question and generate AI response
       if (speaker === 'them' && detectQuestion(text) && meetingSettings?.autoSuggest) {
         try {
-          const response = await generateResponse(text, meetingContext, meetingSettings.openrouterApiKey);
+          const response = await generateResponse(text, meetingContext);
           // Display the response
           displayAIResponse(response);
         } catch (error) {
@@ -777,13 +780,30 @@ async function setupMeetingEvents() {
   });
 
   function updateTranscript(speaker, text, timestamp) {
+    console.log('[SidePanel] updateTranscript', { speaker, text, timestamp });
     const label = speaker === 'you' ? 'You' : 'Them';
     const timeStr = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    const line = document.createElement('div');
-    line.className = 'transcript-line final';
-    line.innerHTML = `<span class="ts-time">${timeStr}</span><span class="ts-speaker ${speaker}">${label}</span><span class="ts-text">${text}</span>`;
-    mEls.transcript.insertBefore(line, mEls.transcript.querySelector('#ai-cards-container'));
+    const lastLine = mEls.transcript.querySelector('.transcript-line.final:last-of-type');
+    const isSameSpeaker = lastLine && lastTranscriptSpeaker === speaker;
+
+    if (isSameSpeaker && lastLine) {
+      const textSpan = lastLine.querySelector('.ts-text');
+      if (textSpan) {
+        textSpan.textContent = `${textSpan.textContent.trim()} ${text.trim()}`;
+      }
+    } else {
+      const line = document.createElement('div');
+      line.className = 'transcript-line final';
+      line.innerHTML = `<span class="ts-time">${timeStr}</span><span class="ts-speaker ${speaker}">${label}</span><span class="ts-text">${text}</span>`;
+      mEls.transcript.insertBefore(line, mEls.transcript.querySelector('#ai-cards-container'));
+      lastTranscriptSpeaker = speaker;
+    }
+
+    if (activeMeetingSession) {
+      activeMeetingSession.transcript.push({ speaker, text, timestamp });
+    }
+
     if(autoScrollEnabled) scrollTranscriptDown();
   }
 
@@ -816,8 +836,8 @@ async function setupMeetingEvents() {
   });
 
   async function triggerAISuggestion(questionText) {
-      if(!settings.openrouterApiKey) {
-          showToast("Add API Key in settings for AI suggestions");
+if(!settings.aiModel) {
+        showToast("Select an AI model in settings for suggestions");
           return;
       }
       
@@ -839,7 +859,7 @@ async function setupMeetingEvents() {
       
       let fullResponse = '';
       try {
-          for await (const token of streamAIResponse(usrPrompt, sysPrompt, settings.openrouterApiKey, settings.aiModel)) {
+          for await (const token of streamAIResponse(usrPrompt, sysPrompt, null, settings.aiModel)) {
               fullResponse += token;
               resEl.textContent = fullResponse;
               if(autoScrollEnabled) scrollTranscriptDown();

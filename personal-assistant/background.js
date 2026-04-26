@@ -131,74 +131,60 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const { tabId } = message;
     console.log("[Background] Received START_MEETING_CAPTURE for tabId:", tabId);
 
-    chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, async (streamId) => {
+    // Send message to content script to start live transcription
+    console.log("[Background] Sending CONTENT_START_TRANSCRIPTION to content script");
+    chrome.tabs.sendMessage(tabId, {
+      type: 'CONTENT_START_TRANSCRIPTION'
+    }, async (response) => {
       if (chrome.runtime.lastError) {
-        console.error("[Background] tabCapture.getMediaStreamId Error:", chrome.runtime.lastError.message);
-        sendResponse({ success: false, error: chrome.runtime.lastError.message });
-        return;
-      }
-      
-      console.log("[Background] Successfully generated tab streamId:", streamId);
+        console.warn("[Background] No content script listener yet, injecting content script:", chrome.runtime.lastError.message);
+        console.log("[Background] Attempting programmatic injection into tabId:", tabId);
 
-      // Create Offscreen Document if it doesn't exist
-      const offscreenUrl = chrome.runtime.getURL('offscreen.html');
-      const existing = await chrome.runtime.getContexts({
-        contextTypes: ['OFFSCREEN_DOCUMENT'],
-        documentUrls: [offscreenUrl]
-      });
-
-      console.log("[Background] Existing offscreen contexts found:", existing.length);
-      if (existing.length === 0) {
-        console.log("[Background] Creating new Offscreen Document...");
-        await chrome.offscreen.createDocument({
-          url: offscreenUrl,
-          reasons: ['USER_MEDIA'],
-          justification: 'Capture tab audio and microphone for meeting transcription'
-        });
-        console.log("[Background] Offscreen Document created. Waiting for initialization...");
-        // Wait for offscreen document to fully load
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      // Forward the stream ID to the Offscreen Document with retry logic
-      console.log("[Background] Forwarding streamId to Offscreen Document via OFFSCREEN_START_CAPTURE");
-      
-      let retries = 3;
-      let success = false;
-      while (retries > 0 && !success) {
         try {
-          await chrome.runtime.sendMessage({
-            type: 'OFFSCREEN_START_CAPTURE',
-            streamId: streamId
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['content.js']
           });
-          success = true;
-          console.log("[Background] Message sent successfully to offscreen document");
-        } catch (error) {
-          retries--;
-          console.warn(`[Background] Failed to send message to offscreen (${retries} retries left):`, error.message);
-          if (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, 200));
-          }
+          console.log("[Background] Injected content script into tab", tabId);
+        } catch (injectError) {
+          console.error("[Background] Failed to inject content script:", injectError);
+          sendResponse({ success: false, error: injectError.message || injectError });
+          return;
         }
-      }
 
-      if (!success) {
-        console.error("[Background] Failed to communicate with offscreen document after retries");
-        sendResponse({ success: false, error: "Could not communicate with offscreen document" });
-        return;
-      }
+        chrome.tabs.sendMessage(tabId, {
+          type: 'CONTENT_START_TRANSCRIPTION'
+        }, (retryResponse) => {
+          if (chrome.runtime.lastError) {
+            console.error("[Background] Retry failed after injection:", chrome.runtime.lastError.message);
+            sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            return;
+          }
 
-      console.log("[Background] START_MEETING_CAPTURE flow complete. Success.");
-      sendResponse({ success: true });
+          console.log("[Background] Content script responded after injection:", retryResponse);
+          sendResponse({ success: true });
+        });
+      } else {
+        console.log("[Background] Content script responded:", response);
+        sendResponse({ success: true });
+      }
     });
 
     return true; // Keep async channel open
   }
 
   if (message.type === 'STOP_MEETING_CAPTURE') {
-    console.log("[Background] Received STOP_MEETING_CAPTURE. Closing Offscreen Document.");
-    chrome.runtime.sendMessage({ type: 'OFFSCREEN_STOP_CAPTURE' });
-    chrome.offscreen.closeDocument().catch(e => console.log("[Background] closeDocument Error (ignorable):", e));
+    console.log("[Background] Received STOP_MEETING_CAPTURE. Stopping content script transcription.");
+    // Send message to content script to stop transcription
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          type: 'CONTENT_STOP_TRANSCRIPTION'
+        }, (response) => {
+          console.log("[Background] Content script stop response:", response);
+        });
+      }
+    });
     sendResponse({ success: true });
     return true;
   }

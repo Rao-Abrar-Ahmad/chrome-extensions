@@ -10,10 +10,10 @@
     "sidePanel",
     "contextMenus",
     "tabCapture",
-    "offscreen",
-    "tabs"
+    "tabs",
+    "scripting"
   ],
-  "host_permissions": ["https://openrouter.ai/*"],
+  "host_permissions": ["https://huggingface.co/*", "https://meet.google.com/*"],
   "action": {
     "default_title": "Open Personal Assistant",
     "default_icon": {
@@ -29,6 +29,13 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

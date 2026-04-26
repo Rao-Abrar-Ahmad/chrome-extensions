@@ -1,5 +1,21 @@
-import { pipeline } from '@xenova/transformers';
+import { pipeline, env } from '@xenova/transformers';
 
+// Configure Transformer.js for Chrome extension environment
+env.remoteHost = ''; // Empty string instead of null
+env.remotePathTemplate = 'https://huggingface.co/{model}/resolve/main/{file}';
+env.allowLocalModels = false;
+env.useCache = true;
+
+console.log("[Offscreen] Transformer.js configured with remote path template:", env.remotePathTemplate);
+
+// Override fetch to log URLs
+const originalFetch = window.fetch;
+window.fetch = function(url, options) {
+  console.log("[Offscreen] Fetching URL:", url);
+  return originalFetch.call(this, url, options);
+};
+
+console.log("[Offscreen] Transformer.js configured with remote host:", env.remoteHost);
 console.log("[Offscreen] Offscreen document loaded!");
 
 let tabRecorder = null;
@@ -7,7 +23,9 @@ let micRecorder = null;
 let isCapturing = false;
 let transcriber = null;
 
+console.log("[Offscreen] Setting up message listener...");
 chrome.runtime.onMessage.addListener(async (message) => {
+  console.log("[Offscreen] Received message:", message.type);
   if (message.type === 'OFFSCREEN_START_CAPTURE') {
     console.log("[Offscreen] Received OFFSCREEN_START_CAPTURE. Loading model and starting capture.");
     isCapturing = true;
@@ -25,19 +43,31 @@ chrome.runtime.onMessage.addListener(async (message) => {
 async function loadModel() {
   if (transcriber) return; // Already loaded
 
+  // Try Web Speech API first (no download needed)
+  console.log("[Offscreen] Trying Web Speech API first (no model download needed)...");
   try {
-    console.log("[Offscreen] Loading Whisper small model...");
-    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small');
-    console.log("[Offscreen] Whisper model loaded successfully.");
-  } catch (error) {
-    console.warn("[Offscreen] Failed to load small model, trying tiny:", error);
-    try {
-      transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
-      console.log("[Offscreen] Whisper tiny model loaded as fallback.");
-    } catch (fallbackError) {
-      console.error("[Offscreen] Failed to load any Whisper model:", fallbackError);
-      throw new Error("Unable to load transcription model. Please check storage space.");
+    // Check if Web Speech API is available
+    if (typeof webkitSpeechRecognition !== 'undefined' || typeof SpeechRecognition !== 'undefined') {
+      transcriber = 'web-speech-api';
+      console.log("[Offscreen] Web Speech API available and ready.");
+      return;
+    } else {
+      console.warn("[Offscreen] Web Speech API not available in this context.");
     }
+  } catch (error) {
+    console.warn("[Offscreen] Web Speech API check failed:", error);
+  }
+
+  // Fallback to Whisper tiny model
+  try {
+    console.log("[Offscreen] Falling back to Whisper tiny model...");
+    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+      quantized: true,
+    });
+    console.log("[Offscreen] Whisper tiny model loaded successfully.");
+  } catch (error) {
+    console.error("[Offscreen] All transcription methods failed:", error);
+    throw new Error("Unable to initialize any transcription method.");
   }
 }
 
@@ -106,22 +136,63 @@ function stopDualCapture() {
 
 async function transcribeAudio(audioBlob, speaker) {
   console.log(`[Offscreen] transcribeAudio called for ${speaker}, blob size: ${audioBlob.size}, transcriber ready: ${!!transcriber}`);
-  
+
   if (!transcriber) {
     console.warn("[Offscreen] Transcriber not loaded, skipping transcription.");
     return;
   }
 
+  // Handle Web Speech API fallback
+  if (transcriber === 'web-speech-api') {
+    console.log(`[Offscreen] Using Web Speech API for ${speaker}...`);
+    try {
+      const recognition = new webkitSpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript.trim();
+        if (transcript) {
+          console.log(`[Offscreen] Web Speech API transcribed ${speaker}: ${transcript}`);
+          chrome.runtime.sendMessage({
+            type: 'TRANSCRIPT_UPDATE',
+            speaker,
+            text: transcript,
+            timestamp: Date.now()
+          });
+        }
+      };
+
+      recognition.onerror = (error) => {
+        console.error(`[Offscreen] Web Speech API error for ${speaker}:`, error.error);
+      };
+
+      // Convert blob to audio URL for Web Speech API
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      audio.onloadeddata = () => {
+        recognition.start();
+      };
+      audio.load();
+
+    } catch (error) {
+      console.error(`[Offscreen] Web Speech API setup error for ${speaker}:`, error);
+    }
+    return;
+  }
+
+  // Handle Whisper model
   try {
     console.log(`[Offscreen] Converting blob to audio array for ${speaker}...`);
     // Convert blob to Float32Array
     const audioBuffer = await audioBlob.arrayBuffer();
     console.log(`[Offscreen] Audio buffer created: ${audioBuffer.byteLength} bytes`);
-    
+
     const audioContext = new AudioContext();
     const audioData = await audioContext.decodeAudioData(audioBuffer);
     console.log(`[Offscreen] Audio decoded: ${audioData.length} samples, ${audioData.numberOfChannels} channels`);
-    
+
     const audioArray = audioData.getChannelData(0); // Mono
     console.log(`[Offscreen] Audio array extracted: ${audioArray.length} samples`);
 

@@ -109,15 +109,13 @@
       <!-- Settings Overlay (Hidden) -->
       <div id="meeting-settings-overlay" style="display: none; padding: 16px;">
         <h3 style="margin-top: 0; padding: 0 0 16px 0;">Settings</h3>
-        <label>OpenRouter API Key:</label>
-        <input type="password" id="meeting-api-key" class="std-input" style="margin-bottom: 8px;">
-        <label>AI Model:</label>
+        <label>AI Model (Local):</label>
         <select id="meeting-ai-model" class="std-input" style="margin-bottom: 8px;">
-          <option value="meta-llama/llama-3.1-8b-instruct:free">Llama 3.1 8B (Free)</option>
-          <option value="google/gemma-2-9b-it:free">Gemma 2 9B (Free)</option>
+          <option value="Xenova/gpt2">GPT-2 (Fast, Local)</option>
+          <option value="Xenova/distilgpt2">DistilGPT-2 (Faster, Local)</option>
         </select>
         <label style="display: flex; gap: 8px; align-items: center; cursor: pointer; padding-bottom: 16px;">
-          <input type="checkbox" id="meeting-auto-suggest"> Auto-Suggest (Streaming AI on Questions)
+          <input type="checkbox" id="meeting-auto-suggest"> Auto-Suggest (Local AI on Questions)
         </label>
         <div style="margin-top: 16px;">
            <button id="meeting-settings-save" class="primary full-width">Save Settings</button>

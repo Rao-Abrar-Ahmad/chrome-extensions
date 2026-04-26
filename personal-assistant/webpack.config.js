@@ -3,7 +3,6 @@ const CopyPlugin = require('copy-webpack-plugin');
 
 module.exports = {
   entry: {
-    offscreen: './offscreen.js',
     background: './background.js',
     sidepanel: './sidepanel.js',
     permission: './permission.js'
@@ -28,6 +27,7 @@ module.exports = {
         { from: '*.html', to: '[name][ext]' },
         { from: '*.css', to: '[name][ext]' },
         { from: '*.json', to: '[name][ext]' },
+        { from: 'content.js', to: 'content.js' },
         { from: 'icons/**/*', to: 'icons/[name][ext]' },
         { from: 'modules/**/*', to: 'modules/[name][ext]' }
       ]
