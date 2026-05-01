@@ -1,4 +1,4 @@
-## Complete Build Specification v2.1
+## Complete Build Specification v2.2
 ### Agent-Ready Documentation (for Claude Code or any AI agent)
 
 ---
@@ -30,7 +30,8 @@
 19. [Data Consolidation Workflow](#19-data-consolidation-workflow)
 20. [Analytics Dashboard Architecture](#20-analytics-dashboard-architecture)
 21. [Known Challenges & Solutions](#21-known-challenges--solutions)
-22. [Quick Reference — All Selectors](#22-quick-reference--all-selectors)
+22. [Text Formatting Toolbar (v2.2)](#22-text-formatting-toolbar-v22)
+23. [Quick Reference — All Selectors](#23-quick-reference--all-selectors)
 
 ---
 
@@ -38,18 +39,19 @@
 
 **Extension Name:** Upwork Keyword Finder
 
-**Purpose:** A Chrome Extension that works on Upwork job search pages. The user manually triggers a scrape. The extension reads all job listings on the page, stores every job as a structured JSON record (for long-term analysis), analyzes the content with Chrome's built-in AI (Gemini Nano) or a fallback algorithm to find top keywords, and displays results in the Chrome Side Panel. Keywords are also highlighted directly on the Upwork page.
+**Purpose:** A Chrome Extension that works on Upwork job search pages. The user manually triggers a scrape. The extension reads all job listings on the page, stores every job as a structured JSON record (for long-term analysis), analyzes the content with Chrome's built-in AI (Gemini Nano) or a fallback algorithm to find top keywords, and displays results in the Chrome Side Panel. Keywords are also highlighted directly on the Upwork page. **Additionally, it provides a globally available Unicode formatting toolbar to simulate rich text on Upwork's plain-text fields.**
 
 **Primary Value Propositions:**
 1. **Job Database** — Every scrape saves full job data. After running this for days/weeks, the user has a dataset to analyze trends, budgets, client locations, and skill demand.
 2. **Keyword Intelligence** — The AI finds the most-used words in job titles and descriptions, helping freelancers optimize their profiles.
 3. **Visual Highlighting** — Keywords get highlighted in three tiers directly on the Upwork page.
+4. **Text Formatting** — Automatically detect textareas and inject a toolbar to insert Emojis or format text using Mathematical Unicode (Bold/Italic).
 
 ---
 
 ## 2. What Changed from v1 — Key Decisions
 
-| Feature | v1 | v2 | v2.1 (Latest) |
+| Feature | v1 | v2 | v2.2 (Latest) |
 |---|---|---|---|
 | UI Surface | Popup | Side Panel | Side Panel + **Analytics Tab** |
 | Scraping trigger | Automatic | Manual click | Manual + **SPA Navigation Support** |
@@ -57,6 +59,7 @@
 | Data volume | Current page | All jobs + metadata | **Master Consolidated Dataset** |
 | Export | None | Export to JSON | JSON + **Visual Dashboard** |
 | Time Intelligence | Relative only | Relative only | **Absolute `postedAt` Parsing** |
+| Text Editing | None | None | **Unicode Formatting Toolbar (Bold, Emojis)** |
 
 ---
 
@@ -1452,7 +1455,46 @@ Users who want to enable AI:
 
 ---
 
-## 20. Quick Reference — All Selectors
+## 20. Data Consolidation Workflow
+
+To convert individual scrape exports into a unified dataset for analysis, a consolidation step is required. This is handled by `analytics/consolidate.js`.
+
+### 20.1 Workflow
+1. User scrapes jobs across multiple days/pages.
+2. User uses the "Export JSON" feature in the sidepanel to save files to the `data/` folder.
+3. User runs `node analytics/consolidate.js`.
+4. The script:
+   - Scans the `data/` directory for all `.json` files.
+   - Parses every session and every job.
+   - De-duplicates jobs based on `jobId`.
+   - Keeps the record with the most recent `scrapedAt` timestamp.
+   - Outputs a single `master-data.json` file in the `analytics/` folder.
+
+---
+
+## 21. Analytics Dashboard Architecture
+
+The dashboard is a premium visual layer built with **Chart.js v4.4.2** (localized in `lib/chart.min.js` to comply with CSP).
+
+### 21.1 Core Components
+- **`analytics.html`**: The UI structure using CSS Grid and Flexbox for a responsive, dark-mode dashboard.
+- **`analytics.css`**: Premium styling featuring Glassmorphism, fade-in animations, and custom color tokens.
+- **`analytics.js`**: The processing engine that:
+  - Fetches `master-data.json`.
+  - Calculates KPIs (Total Jobs, Avg Proposals, Total Analyzed Budget).
+  - Generates Time Series data for posting trends.
+  - Computes a **Competition Heatmap** (Day of Week vs. Hour of Day).
+  - Suggests **Optimal Application Windows** based on historical proposal density.
+  - Renders a filterable **Job Feed** with detailed job cards.
+
+### 21.2 Local Library Management
+To bypass Chrome Extension Content Security Policy (CSP), **Chart.js** must be hosted locally. 
+- Path: `lib/chart.min.js`
+- Reference: `<script src="../lib/chart.min.js"></script>`
+
+---
+
+## 22. Quick Reference — All Selectors
 
 ```javascript
 // COPY-PASTE READY — All Upwork DOM selectors
@@ -1469,7 +1511,7 @@ tile.getAttribute('data-ev-page_number')             // "1"
 '[data-test="job-tile-title-link UpLink"]'           // <a> with text and href
 'h2.job-tile-title a'                                // fallback
 
-// Published date (NOTE: "pubilshed" typo is intentional)
+// Published date
 '[data-test="job-pubilshed-date"]'                   // full text: "Posted 10 minutes ago"
 
 // Description  
@@ -1501,45 +1543,23 @@ tile.getAttribute('data-ev-page_number')             // "1"
 
 ---
 
-## 19. Data Consolidation Workflow
+## 23. Text Formatting Toolbar (v2.2)
 
-To convert individual scrape exports into a unified dataset for analysis, a consolidation step is required. This is handled by `analytics/consolidate.js`.
+Upwork's input fields (proposals, messages) are plain text `textarea` elements and do not support Markdown or rich text. To solve this, version 2.2 introduces a global formatting toolbar.
 
-### 19.1 Workflow
-1. User scrapes jobs across multiple days/pages.
-2. User uses the "Export JSON" feature in the sidepanel to save files to the `data/` folder.
-3. User runs `node analytics/consolidate.js`.
-4. The script:
-   - Scans the `data/` directory for all `.json` files.
-   - Parses every session and every job.
-   - De-duplicates jobs based on `jobId`.
-   - Keeps the record with the most recent `scrapedAt` timestamp.
-   - Outputs a single `master-data.json` file in the `analytics/` folder.
+### 23.1 How it Works
+1. A global `focusin` listener detects when a user clicks into a `<textarea>`.
+2. A lightweight, floating toolbar (`#upwork-fmt-toolbar`) is injected directly above the textarea.
+3. **Unicode Translation**: When the user selects text and clicks "B" (Bold) or "I" (Italic), the extension reads the selection and converts standard characters (a-z, A-Z, 0-9) to their **Mathematical Alphanumeric** Unicode equivalents.
+4. **Emojis**: An emoji picker allows instant insertion of common emojis at the cursor position.
 
----
-
-## 20. Analytics Dashboard Architecture
-
-The dashboard is a premium visual layer built with **Chart.js v4.4.2** (localized in `lib/chart.min.js` to comply with CSP).
-
-### 20.1 Core Components
-- **`analytics.html`**: The UI structure using CSS Grid and Flexbox for a responsive, dark-mode dashboard.
-- **`analytics.css`**: Premium styling featuring Glassmorphism, fade-in animations, and custom color tokens.
-- **`analytics.js`**: The processing engine that:
-  - Fetches `master-data.json`.
-  - Calculates KPIs (Total Jobs, Avg Proposals, Total Analyzed Budget).
-  - Generates Time Series data for posting trends.
-  - Computes a **Competition Heatmap** (Day of Week vs. Hour of Day).
-  - Suggests **Optimal Application Windows** based on historical proposal density.
-  - Renders a filterable **Job Feed** with detailed job cards.
-
-### 20.2 Local Library Management
-To bypass Chrome Extension Content Security Policy (CSP), **Chart.js** must be hosted locally. 
-- Path: `lib/chart.min.js`
-- Reference: `<script src="../lib/chart.min.js"></script>`
+### 23.2 Architecture
+- **Files**: `content/toolbar.js`, `content/toolbar.css`
+- **Scope**: Matched to `https://www.upwork.com/*` in `manifest.json` so it works everywhere.
+- **Validity**: Upwork natively supports standard UTF-8 encoding. The Unicode mathematical bold characters (e.g., `U+1D5D4` for 𝗔) are saved and rendered seamlessly by Upwork's backend.
 
 ---
 
-*Specification version 2.1 — April 2026*
+*Specification version 2.2 — May 2026*
 *Built for: Claude Code, Cursor, or any AI coding agent*
 *All selectors verified against live Upwork HTML (April 2026)*

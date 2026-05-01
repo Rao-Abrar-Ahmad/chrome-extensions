@@ -35,6 +35,18 @@
         "content/content-main.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.upwork.com/*"
+      ],
+      "js": [
+        "content/toolbar.js"
+      ],
+      "css": [
+        "content/toolbar.css"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "permissions": [

@@ -1,0 +1,106 @@
+/* content/toolbar.css */
+
+#upwork-fmt-toolbar {
+    position: absolute;
+    z-index: 2147483647; /* Highest possible z-index to stay above everything */
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(20, 168, 0, 0.3);
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    padding: 6px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    transition: opacity 0.2s;
+    user-select: none;
+}
+
+/* Dark mode support if Upwork is dark, though Upwork is mostly light */
+@media (prefers-color-scheme: dark) {
+    #upwork-fmt-toolbar {
+        background: rgba(30, 30, 30, 0.95);
+        border: 1px solid rgba(20, 168, 0, 0.5);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+    }
+}
+
+.upk-tb-buttons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.upk-tb-btn {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    color: #333;
+    transition: background 0.2s, color 0.2s;
+}
+
+@media (prefers-color-scheme: dark) {
+    .upk-tb-btn { color: #ccc; }
+}
+
+.upk-tb-btn:hover {
+    background: rgba(20, 168, 0, 0.1);
+    color: #14a800;
+}
+
+.upk-tb-divider {
+    width: 1px;
+    height: 18px;
+    background: #e0e0e0;
+    margin: 0 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+    .upk-tb-divider { background: #444; }
+}
+
+.upk-tb-close {
+    color: #888;
+    font-size: 12px;
+}
+
+.upk-tb-close:hover {
+    color: #d93025;
+    background: rgba(217, 48, 37, 0.1);
+}
+
+/* Emoji Picker Popup */
+.upk-emoji-picker {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 5px;
+    background: inherit;
+    border: 1px solid rgba(20, 168, 0, 0.3);
+    border-radius: 8px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+    padding: 8px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    z-index: 2147483647;
+}
+
+.upk-emoji-item {
+    font-size: 18px;
+    padding: 4px;
+    cursor: pointer;
+    text-align: center;
+    border-radius: 4px;
+    transition: transform 0.1s, background 0.2s;
+}
+
+.upk-emoji-item:hover {
+    background: rgba(20, 168, 0, 0.1);
+    transform: scale(1.2);
+}
