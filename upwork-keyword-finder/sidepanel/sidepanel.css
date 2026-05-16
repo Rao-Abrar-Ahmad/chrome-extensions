@@ -1,5 +1,6 @@
 :root {
   --primary: #14a800;
+  --primary-color: #14a800;
   --primary-hover: #108a00;
   --secondary: #e0e0e0;
   --background: #f9f9f9;
@@ -72,8 +73,8 @@ body {
 .view {
   display: none;
   padding: 16px;
-  overflow-y: auto;
   flex: 1;
+  overflow: hidden; /* let child elements control their own scroll */
 }
 
 .view.active {
@@ -249,6 +250,28 @@ body {
 }
 
 @keyframes pulse {
-  0% { width: 30%; }
-  100% { width: 80%; }
+  0% {
+    width: 30%;
+  }
+
+  100% {
+    width: 80%;
+  }
+}
+
+.result-columns {
+  display: flex;
+  gap: 16px;
+}
+
+.result-col {
+  flex: 1;
+}
+
+.result-col h4 {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: var(--text-light);
+  border-bottom: 1px solid #eee;
+  padding-bottom: 4px;
 }

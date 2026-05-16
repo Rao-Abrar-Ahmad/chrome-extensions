@@ -686,74 +686,105 @@ All data is stored in `chrome.storage.local`. This is stored on the user's local
 ```javascript
 // lib/storage-manager.js
 
-const DB_KEY = 'scrapeSessions';
+const DB_KEY = 'masterJobs';
+const META_KEY = 'lastExtraction';
 const KEYWORDS_KEY = 'keywordHistory';
 const PREFS_KEY = 'userPreferences';
+const HISTORY_KEY = 'extractionHistory';
 
-async function saveSession(sessionData) {
-  const { [DB_KEY]: existing = [] } = await chrome.storage.local.get(DB_KEY);
-  existing.unshift(sessionData); // newest first
+export async function saveSession(sessionData) {
+  const data = await chrome.storage.local.get([DB_KEY, HISTORY_KEY]);
+  let masterJobs = data[DB_KEY] || [];
+  let history = data[HISTORY_KEY] || [];
   
-  // Keep last 100 sessions (configurable)
-  const trimmed = existing.slice(0, 100);
-  await chrome.storage.local.set({ [DB_KEY]: trimmed });
+  const jobsMap = new Map();
+  masterJobs.forEach(job => jobsMap.set(job.jobId, job));
+  
+  let newJobsCount = 0;
+  
+  if (sessionData.jobs && Array.isArray(sessionData.jobs)) {
+      sessionData.jobs.forEach(job => {
+          if (!jobsMap.has(job.jobId)) {
+              jobsMap.set(job.jobId, job);
+              newJobsCount++;
+          } else {
+              const existing = jobsMap.get(job.jobId);
+              if (new Date(job.scrapedAt) > new Date(existing.scrapedAt)) {
+                  jobsMap.set(job.jobId, job);
+              }
+          }
+      });
+  }
+  
+  masterJobs = Array.from(jobsMap.values());
+  await chrome.storage.local.set({ [DB_KEY]: masterJobs });
+  
+  const meta = {
+      timestamp: sessionData.scrapedAt,
+      jobCount: sessionData.jobs.length,
+      newJobsAdded: newJobsCount,
+      totalJobs: masterJobs.length
+  };
+  await chrome.storage.local.set({ [META_KEY]: meta });
+  
+  history.unshift({
+      scrapeSessionId: sessionData.scrapeSessionId,
+      timestamp: sessionData.scrapedAt,
+      searchQuery: sessionData.searchQuery || 'Generic Search',
+      jobCount: sessionData.jobs.length,
+      newJobsAdded: newJobsCount
+  });
+  if (history.length > 50) history = history.slice(0, 50);
+  await chrome.storage.local.set({ [HISTORY_KEY]: history });
   
   return sessionData.scrapeSessionId;
 }
 
-async function getSessions() {
-  const { [DB_KEY]: sessions = [] } = await chrome.storage.local.get(DB_KEY);
-  return sessions;
+export async function getExtractionHistory() {
+  const data = await chrome.storage.local.get(HISTORY_KEY);
+  return data[HISTORY_KEY] || [];
 }
 
-async function getSessionById(sessionId) {
-  const sessions = await getSessions();
-  return sessions.find(s => s.scrapeSessionId === sessionId);
+export async function getMasterJobs() {
+  const data = await chrome.storage.local.get(DB_KEY);
+  return data[DB_KEY] || [];
 }
 
-async function deleteSession(sessionId) {
-  const sessions = await getSessions();
-  const filtered = sessions.filter(s => s.scrapeSessionId !== sessionId);
-  await chrome.storage.local.set({ [DB_KEY]: filtered });
-}
-
-async function exportAllToJSON() {
-  const sessions = await getSessions();
-  const blob = new Blob([JSON.stringify(sessions, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
+export async function getStorageStats() {
+  const data = await chrome.storage.local.get([DB_KEY, META_KEY]);
+  const masterJobs = data[DB_KEY] || [];
+  const meta = data[META_KEY] || null;
   
-  await chrome.downloads.download({
-    url,
-    filename: `upwork-jobs-export-${new Date().toISOString().split('T')[0]}.json`,
-    saveAs: true
-  });
-}
-
-async function getStorageStats() {
-  const sessions = await getSessions();
-  const totalJobs = sessions.reduce((sum, s) => sum + (s.jobs?.length || 0), 0);
   return {
-    sessionCount: sessions.length,
-    totalJobs,
-    oldestSession: sessions.length > 0 ? sessions[sessions.length - 1].scrapedAt : null,
-    newestSession: sessions.length > 0 ? sessions[0].scrapedAt : null
+    totalJobs: masterJobs.length,
+    lastExtraction: meta
   };
 }
 
-async function saveKeywordAnalysis(keywords) {
-  const { [KEYWORDS_KEY]: history = [] } = await chrome.storage.local.get(KEYWORDS_KEY);
+export async function saveKeywordAnalysis(keywords) {
+  const data = await chrome.storage.local.get(KEYWORDS_KEY);
+  const history = data[KEYWORDS_KEY] || [];
   history.unshift({ ...keywords, timestamp: new Date().toISOString() });
   await chrome.storage.local.set({ [KEYWORDS_KEY]: history.slice(0, 20) });
 }
 
-async function getPreferences() {
-  const { [PREFS_KEY]: prefs = {} } = await chrome.storage.local.get(PREFS_KEY);
+export async function getPreferences() {
+  const data = await chrome.storage.local.get(PREFS_KEY);
+  const prefs = data[PREFS_KEY] || {};
   return {
     minFrequency: 2,
     highlightEnabled: true,
     highlightColors: { high: '#FFF176', medium: '#E8F5E9', low: '#E3F2FD' },
     ...prefs
-  };
+}
+
+export async function savePreferences(newPrefs) {
+  const current = await getPreferences();
+  await chrome.storage.local.set({ [PREFS_KEY]: { ...current, ...newPrefs } });
+}
+
+export async function clearAllStorage() {
+    await chrome.storage.local.remove([DB_KEY, META_KEY, KEYWORDS_KEY, HISTORY_KEY]);
 }
 ```
 
@@ -768,6 +799,9 @@ The "Export All Jobs" button in the side panel calls `exportAllToJSON()`. This c
 ```javascript
 // background/service-worker.js
 
+import { saveSession, getStorageStats, saveKeywordAnalysis, getMasterJobs, getExtractionHistory } from '../lib/storage-manager.js';
+import { computeTFIDF } from '../lib/keyword-algorithm.js';
+
 // Open side panel when extension icon is clicked
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
@@ -779,18 +813,18 @@ let aiSession = null;
 
 // Handle messages from content script and side panel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log(`[Background] Received message action: ${message.action}`);
   
   if (message.action === 'saveSession') {
     saveSession(message.sessionData)
-      .then(id => sendResponse({ success: true, sessionId: id }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-  
-  if (message.action === 'getSessions') {
-    getSessions()
-      .then(sessions => sendResponse({ success: true, sessions }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
+      .then(id => {
+          console.log(`[Background] Session saved: ${id}`);
+          sendResponse({ success: true, sessionId: id })
+      })
+      .catch(err => {
+          console.error('[Background] Session save error:', err);
+          sendResponse({ success: false, error: err.message });
+      });
     return true;
   }
   
@@ -801,10 +835,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   
-  if (message.action === 'analyzeKeywords') {
-    analyzeKeywords(message.jobs)
-      .then(result => sendResponse({ success: true, data: result }))
+  if (message.action === 'getHistory') {
+    getExtractionHistory()
+      .then(history => sendResponse({ success: true, history }))
       .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+  
+  if (message.action === 'analyzeAllKeywords') {
+    console.log('[Background] Starting global keyword analysis');
+    getMasterJobs().then(async masterJobs => {
+        try {
+            console.log('[Background] Computing TF-IDF Algorithm on all jobs immediately');
+            const algoResult = computeTFIDF(masterJobs);
+            const algorithmData = {
+                skillKeywords: topN(algoResult.skillKeywords, 20),
+                titleKeywords: topN(algoResult.titleKeywords, 20),
+                actionPhrases: topN(algoResult.actionPhrases, 15)
+            };
+            
+            const initialResult = { method: 'algorithm', algorithm: algorithmData };
+            const aiStatus = await checkAIAvailability();
+            const aiRunning = aiStatus.available;
+            
+            console.log(`[Background] Replying immediately with algorithm results. AI running: ${aiRunning}`);
+            sendResponse({ success: true, data: initialResult, aiRunning: aiRunning });
+            
+            if (aiRunning) {
+                runAIBackground(masterJobs, algorithmData);
+            } else {
+                await saveKeywordAnalysis(initialResult);
+            }
+        } catch (err) {
+            console.error('[Background] Keyword analysis threw error:', err);
+            sendResponse({ success: false, error: err.message });
+        }
+    });
     return true;
   }
   
@@ -814,54 +880,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(() => sendResponse({ available: false }));
     return true;
   }
-  
-  if (message.action === 'exportJSON') {
-    exportAllToJSON()
-      .then(() => sendResponse({ success: true }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-  
-  if (message.action === 'deleteSession') {
-    deleteSession(message.sessionId)
-      .then(() => sendResponse({ success: true }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
 });
 
-async function analyzeKeywords(jobs) {
-  const aiStatus = await checkAIAvailability();
-  
-  if (aiStatus.available) {
+async function runAIBackground(masterJobs, algorithmData) {
     try {
-      const session = await getAISession();
-      const result = await extractKeywordsWithAI(jobs, session);
-      if (result) {
-        await saveKeywordAnalysis({ ...result, method: 'ai' });
-        return { ...result, method: 'ai' };
-      }
+        const latestJobs = [...masterJobs]
+            .sort((a, b) => new Date(b.scrapedAt) - new Date(a.scrapedAt))
+            .slice(0, 100);
+            
+        console.log(`[Background] Using AI Model on latest ${latestJobs.length} jobs asynchronously`);
+        const session = await getAISession();
+        const aiResult = await extractKeywordsWithAI(latestJobs, session);
+        
+        const finalResult = {
+            method: 'both',
+            algorithm: algorithmData,
+            ai: aiResult
+        };
+        
+        await saveKeywordAnalysis(finalResult);
+        console.log('[Background] AI analysis complete, broadcasting to UI.');
+        
+        chrome.runtime.sendMessage({ 
+            action: 'aiAnalysisComplete', 
+            success: true, 
+            data: finalResult 
+        }).catch(err => console.log('[Background] UI might be closed, ignoring broadcast err.', err));
+        
     } catch (err) {
-      console.warn('[UKF] AI analysis failed, falling back:', err);
+        console.warn('[Background] AI analysis failed in background:', err);
+        chrome.runtime.sendMessage({ 
+            action: 'aiAnalysisComplete', 
+            success: false, 
+            error: err.message 
+        }).catch(e => {});
     }
-  }
-  
-  // Fallback
-  const result = computeTFIDF(jobs);
-  await saveKeywordAnalysis({ ...result, method: 'algorithm' });
-  return { ...result, method: 'algorithm' };
 }
 
 async function checkAIAvailability() {
-  if (!('LanguageModel' in self)) {
+  if (!('LanguageModel' in self) && !('ai' in self)) {
     return { available: false, reason: 'LanguageModel API not available in this Chrome version' };
   }
+  
+  const aiObj = self.ai || self.LanguageModel;
+  
   try {
-    const status = await LanguageModel.availability();
+    const status = await (aiObj.languageModel ? aiObj.languageModel.capabilities() : aiObj.availability());
+    const isAvailable = typeof status === 'object' ? status.available !== 'no' : status !== 'no';
     return {
-      available: status !== 'no',
-      needsDownload: status === 'after-download',
-      status
+      available: isAvailable,
+      needsDownload: typeof status === 'object' ? status.available === 'after-download' : status === 'after-download',
+      status: typeof status === 'object' ? status.available : status
     };
   } catch {
     return { available: false, reason: 'API error' };
@@ -871,7 +940,9 @@ async function checkAIAvailability() {
 async function getAISession() {
   if (aiSession) return aiSession;
   
-  aiSession = await LanguageModel.create({
+  const aiObj = self.ai?.languageModel || self.LanguageModel;
+  
+  aiSession = await aiObj.create({
     systemPrompt: `You are a keyword extraction expert for freelance job postings on Upwork. 
 When given job data, identify and return keywords in valid JSON only. No other text.`
   });
@@ -879,8 +950,78 @@ When given job data, identify and return keywords in valid JSON only. No other t
   return aiSession;
 }
 
+async function extractKeywordsWithAI(jobs, session) {
+  const CHUNK_SIZE = 8;
+  const allResults = { skillKeywords: {}, titleKeywords: {}, actionPhrases: {} };
+  
+  for (let i = 0; i < jobs.length; i += CHUNK_SIZE) {
+    const chunk = jobs.slice(i, i + CHUNK_SIZE);
+    const jobsText = chunk.map((job, idx) => 
+      `[JOB ${i + idx + 1}]\nTitle: ${job.title}\nDesc: ${job.description.substring(0, 300)}\nSkills: ${job.skills.join(', ')}`
+    ).join('\n\n');
+    
+    const prompt = `
+Analyze these ${chunk.length} Upwork job listings. Extract keywords.
+
+${jobsText}
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "skillKeywords": [{"keyword": "React", "count": 3, "importance": "high"}],
+  "titleKeywords": [{"keyword": "Developer Needed", "count": 5, "importance": "high"}],
+  "actionPhrases": [{"keyword": "looking for", "count": 4, "importance": "medium"}]
+}
+`;
+
+    try {
+      const response = await session.prompt(prompt);
+      const cleaned = response.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      mergeKeywordResults(allResults, parsed);
+    } catch (err) {
+      console.warn(`[UKF] AI chunk ${i} failed:`, err);
+    }
+    
+    const processed = Math.min(i + CHUNK_SIZE, jobs.length);
+    chrome.runtime.sendMessage({
+      action: 'analyzeProgress',
+      processed: processed,
+      total: jobs.length
+    }).catch((e) => {});
+  }
+  
+  return {
+    skillKeywords: topN(allResults.skillKeywords, 20),
+    titleKeywords: topN(allResults.titleKeywords, 20),
+    actionPhrases: topN(allResults.actionPhrases, 15)
+  };
+}
+
+function mergeKeywordResults(accumulated, newChunk) {
+  ['skillKeywords', 'titleKeywords', 'actionPhrases'].forEach(category => {
+    if (!newChunk[category]) return;
+    newChunk[category].forEach(item => {
+      const key = item.keyword.toLowerCase();
+      if (accumulated[category][key]) {
+        accumulated[category][key].count += item.count;
+      } else {
+        accumulated[category][key] = { ...item };
+      }
+    });
+  });
+}
+
+function topN(obj, n) {
+  return Object.values(obj)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, n);
+}
+
 self.addEventListener('suspend', () => {
-  if (aiSession) { aiSession.destroy(); aiSession = null; }
+  if (aiSession && typeof aiSession.destroy === 'function') {
+      aiSession.destroy(); 
+      aiSession = null; 
+  }
 });
 ```
 

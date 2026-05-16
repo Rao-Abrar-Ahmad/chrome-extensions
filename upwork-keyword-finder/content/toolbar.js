@@ -3,12 +3,13 @@
 const SANS_BOLD = { upperBase: 0x1D5D4, lowerBase: 0x1D5EE, digitBase: 0x1D7EC };
 const SANS_ITALIC = { upperBase: 0x1D608, lowerBase: 0x1D622 };
 
-const EMOJIS = ['👋', '✅', '📞', '📌', '🔥', '🚀', '💼', '⭐', '💡', '📈', '🤝', '🙌', '💻', '🛠️', '🎯', '✨', '🏆'];
+const DEFAULT_EMOJIS = "⚡,⭐,🔥,🚀,💡,📌,❗,✅,❌,🛠️,💻,📈";
+let currentEmojis = DEFAULT_EMOJIS.split(',').map(e => e.trim());
 
 let activeTextarea = null;
 let toolbarElement = null;
 
-function initToolbar() {
+async function initToolbar() {
     if (document.getElementById('upwork-fmt-toolbar')) return;
 
     toolbarElement = document.createElement('div');
@@ -27,11 +28,17 @@ function initToolbar() {
             <button class="upk-tb-btn upk-tb-close" id="upk-btn-close" title="Close Toolbar">✖</button>
         </div>
         <div class="upk-emoji-picker" id="upk-emoji-picker" style="display: none;">
-            ${EMOJIS.map(e => `<span class="upk-emoji-item">${e}</span>`).join('')}
         </div>
     `;
 
     document.body.appendChild(toolbarElement);
+
+    // Initial load of emojis
+    const data = await chrome.storage.local.get('userPreferences');
+    if (data.userPreferences && data.userPreferences.customEmojis) {
+        currentEmojis = data.userPreferences.customEmojis.split(',').map(e => e.trim());
+    }
+    renderEmojis(currentEmojis);
 
     // Event Listeners for Toolbar
     document.getElementById('upk-btn-bold').addEventListener('click', (e) => {
@@ -55,14 +62,7 @@ function initToolbar() {
         hideToolbar();
     });
 
-    // Emoji clicks
-    document.querySelectorAll('.upk-emoji-item').forEach(el => {
-        el.addEventListener('click', (e) => {
-            e.preventDefault();
-            insertTextAtCursor(e.target.textContent);
-            document.getElementById('upk-emoji-picker').style.display = 'none';
-        });
-    });
+    // Emoji clicks are now handled in renderEmojis
 
     // Listen for textarea focus globally
     document.addEventListener('focusin', handleFocus);
@@ -157,6 +157,33 @@ function insertTextAtCursor(insertText) {
     // Dispatch input event
     activeTextarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
+
+function renderEmojis(emojiArray) {
+    const picker = document.getElementById('upk-emoji-picker');
+    if (!picker) return;
+    
+    picker.innerHTML = emojiArray.map(e => `<span class="upk-emoji-item">${e}</span>`).join('');
+    
+    // Bind emoji clicks
+    document.querySelectorAll('.upk-emoji-item').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.preventDefault();
+            insertTextAtCursor(e.target.textContent);
+            document.getElementById('upk-emoji-picker').style.display = 'none';
+        });
+    });
+}
+
+// Add storage listener for live updates
+chrome.storage.onChanged.addListener((changes, namespace) => {
+    if (namespace === 'local' && changes.userPreferences) {
+        const newPrefs = changes.userPreferences.newValue;
+        if (newPrefs && newPrefs.customEmojis) {
+            currentEmojis = newPrefs.customEmojis.split(',').map(e => e.trim());
+            renderEmojis(currentEmojis);
+        }
+    }
+});
 
 // Initialize when ready
 if (document.readyState === 'loading') {

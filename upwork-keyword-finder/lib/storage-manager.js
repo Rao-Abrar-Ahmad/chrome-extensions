@@ -1,67 +1,77 @@
 // lib/storage-manager.js
 
-const DB_KEY = 'scrapeSessions';
+const DB_KEY = 'masterJobs';
+const META_KEY = 'lastExtraction';
 const KEYWORDS_KEY = 'keywordHistory';
 const PREFS_KEY = 'userPreferences';
+const HISTORY_KEY = 'extractionHistory';
 
 export async function saveSession(sessionData) {
-  const data = await chrome.storage.local.get(DB_KEY);
-  const existing = data[DB_KEY] || [];
-  existing.unshift(sessionData); // newest first
+  const data = await chrome.storage.local.get([DB_KEY, HISTORY_KEY]);
+  let masterJobs = data[DB_KEY] || [];
+  let history = data[HISTORY_KEY] || [];
   
-  // Keep last 100 sessions (configurable)
-  const trimmed = existing.slice(0, 100);
-  await chrome.storage.local.set({ [DB_KEY]: trimmed });
+  const jobsMap = new Map();
+  masterJobs.forEach(job => jobsMap.set(job.jobId, job));
+  
+  let newJobsCount = 0;
+  
+  if (sessionData.jobs && Array.isArray(sessionData.jobs)) {
+      sessionData.jobs.forEach(job => {
+          if (!jobsMap.has(job.jobId)) {
+              jobsMap.set(job.jobId, job);
+              newJobsCount++;
+          } else {
+              const existing = jobsMap.get(job.jobId);
+              if (new Date(job.scrapedAt) > new Date(existing.scrapedAt)) {
+                  jobsMap.set(job.jobId, job);
+              }
+          }
+      });
+  }
+  
+  masterJobs = Array.from(jobsMap.values());
+  await chrome.storage.local.set({ [DB_KEY]: masterJobs });
+  
+  const meta = {
+      timestamp: sessionData.scrapedAt,
+      jobCount: sessionData.jobs.length,
+      newJobsAdded: newJobsCount,
+      totalJobs: masterJobs.length
+  };
+  await chrome.storage.local.set({ [META_KEY]: meta });
+  
+  history.unshift({
+      scrapeSessionId: sessionData.scrapeSessionId,
+      timestamp: sessionData.scrapedAt,
+      searchQuery: sessionData.searchQuery || 'Generic Search',
+      jobCount: sessionData.jobs.length,
+      newJobsAdded: newJobsCount
+  });
+  if (history.length > 50) history = history.slice(0, 50);
+  await chrome.storage.local.set({ [HISTORY_KEY]: history });
   
   return sessionData.scrapeSessionId;
 }
 
-export async function getSessions() {
+export async function getExtractionHistory() {
+  const data = await chrome.storage.local.get(HISTORY_KEY);
+  return data[HISTORY_KEY] || [];
+}
+
+export async function getMasterJobs() {
   const data = await chrome.storage.local.get(DB_KEY);
   return data[DB_KEY] || [];
 }
 
-export async function getSessionById(sessionId) {
-  const sessions = await getSessions();
-  return sessions.find(s => s.scrapeSessionId === sessionId);
-}
-
-export async function deleteSession(sessionId) {
-  const sessions = await getSessions();
-  const filtered = sessions.filter(s => s.scrapeSessionId !== sessionId);
-  await chrome.storage.local.set({ [DB_KEY]: filtered });
-}
-
-export async function exportAllToJSON() {
-  const sessions = await getSessions();
-  
-  // In a service worker context, we convert JSON to a data URL, in a sidepanel we can use Blob
-  // Since this is exported from side panel or background, chrome.downloads needs a blob url or data url.
-  const jsonStr = JSON.stringify(sessions, null, 2);
-  let url = '';
-  
-  if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && URL.createObjectURL) {
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      url = URL.createObjectURL(blob);
-  } else {
-      url = `data:application/json;base64,${btoa(unescape(encodeURIComponent(jsonStr)))}`;
-  }
-  
-  await chrome.downloads.download({
-    url,
-    filename: `upwork-jobs-export-${new Date().toISOString().split('T')[0]}.json`,
-    saveAs: true
-  });
-}
-
 export async function getStorageStats() {
-  const sessions = await getSessions();
-  const totalJobs = sessions.reduce((sum, s) => sum + (s.jobs?.length || 0), 0);
+  const data = await chrome.storage.local.get([DB_KEY, META_KEY]);
+  const masterJobs = data[DB_KEY] || [];
+  const meta = data[META_KEY] || null;
+  
   return {
-    sessionCount: sessions.length,
-    totalJobs,
-    oldestSession: sessions.length > 0 ? sessions[sessions.length - 1].scrapedAt : null,
-    newestSession: sessions.length > 0 ? sessions[0].scrapedAt : null
+    totalJobs: masterJobs.length,
+    lastExtraction: meta
   };
 }
 
@@ -89,5 +99,5 @@ export async function savePreferences(newPrefs) {
 }
 
 export async function clearAllStorage() {
-    await chrome.storage.local.remove([DB_KEY, KEYWORDS_KEY]);
+    await chrome.storage.local.remove([DB_KEY, META_KEY, KEYWORDS_KEY, HISTORY_KEY]);
 }

@@ -6,8 +6,17 @@ let charts = {};
 
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        const response = await fetch('master-data.json');
-        allJobs = await response.json();
+        const data = await chrome.storage.local.get('masterJobs');
+        allJobs = data.masterJobs || [];
+        
+        if (allJobs.length === 0) {
+            document.body.innerHTML = `<div class="container" style="padding-top: 5rem; text-align: center;">
+                <h2>No Data Found</h2>
+                <p>Please use the Upwork Keyword Finder side panel to scrape jobs first.</p>
+            </div>`;
+            return;
+        }
+
         filteredJobs = [...allJobs];
         
         setupFilters();
@@ -15,8 +24,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
         console.error('Failed to load data:', err);
         document.body.innerHTML = `<div class="container" style="padding-top: 5rem; text-align: center;">
-            <h2>Data Not Found</h2>
-            <p>Please run the <code>consolidate.js</code> script first to generate <code>master-data.json</code>.</p>
+            <h2>Error Loading Data</h2>
+            <p>${err.message}</p>
         </div>`;
     }
 });

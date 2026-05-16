@@ -3,12 +3,15 @@
 let currentKeywords = null;
 let connectionRetryCount = 0;
 const MAX_RETRIES = 3;
+let aiLiveTimer = null;   // interval for the live elapsed-time ticker
+let aiStartTime = null;   // when AI analysis began (ms)
 
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
   console.log('[SidePanel] Initializing side panel...');
   try {
+    await loadPreferences();
     await loadStats();
     await checkCurrentPage();
     setupEventListeners();
@@ -34,6 +37,88 @@ async function init() {
         badge.style.display = 'block';
         badge.textContent = aiStatus.available ? '🤖 AI Mode' : '⚡ Smart Mode';
     }
+    
+    chrome.runtime.onMessage.addListener((msg) => {
+
+        // --- Fired BEFORE AI processes a chunk ---
+        if (msg.action === 'chunkStarted') {
+            console.log(`[SidePanel] chunkStarted: chunk ${msg.chunkIndex}/${msg.totalChunks}, jobs ${msg.jobRange}`);
+            
+            // Start (or restart) the live elapsed-time ticker
+            if (!aiLiveTimer) {
+                aiStartTime = Date.now() - (msg.elapsedSecs * 1000);
+                aiLiveTimer = setInterval(() => {
+                    const secs = Math.floor((Date.now() - aiStartTime) / 1000);
+                    const el = document.getElementById('stat-elapsed');
+                    if (el) el.textContent = `${secs}s`;
+                }, 1000);
+                console.log('[SidePanel] Live timer started');
+            }
+            
+            const percent = Math.round((msg.processed / msg.total) * 100);
+            updateProgress(`🤔 AI reading jobs ${msg.jobRange} (chunk ${msg.chunkIndex}/${msg.totalChunks})…`, 'analyze', percent);
+            
+            const statsPanel = document.getElementById('ai-live-stats');
+            if (statsPanel) {
+                statsPanel.style.display = 'block';
+                const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+                setEl('stat-chunks', `${msg.chunkIndex - 1}/${msg.totalChunks} done, reading ${msg.chunkIndex}`);
+                setEl('stat-skills-running', '…');
+                
+                const titlesEl = document.getElementById('stat-current-titles');
+                if (titlesEl && msg.currentJobTitles) {
+                    titlesEl.innerHTML = msg.currentJobTitles
+                        .map(t => `<span style="display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${t}</span>`)
+                        .join('');
+                }
+            }
+        }
+
+        // --- Fired AFTER a chunk is done ---
+        else if (msg.action === 'analyzeProgress') {
+            const percent = Math.round((msg.processed / msg.total) * 100);
+            const label = `✅ Chunk ${msg.chunkIndex}/${msg.totalChunks} done — ${msg.processed}/${msg.total} jobs (${percent}%)`;
+            updateProgress(label, 'analyze', percent);
+            console.log(`[SidePanel] analyzeProgress: chunk ${msg.chunkIndex}/${msg.totalChunks}, ${msg.processed}/${msg.total} jobs, ${msg.elapsedSecs}s elapsed, ${msg.runningSkillCount} skills`);
+            
+            const statsPanel = document.getElementById('ai-live-stats');
+            if (statsPanel) {
+                statsPanel.style.display = 'block';
+                const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+                setEl('stat-chunks', `${msg.chunkIndex}/${msg.totalChunks}`);
+                setEl('stat-elapsed', `${msg.elapsedSecs}s`);
+                setEl('stat-skills-running', msg.runningSkillCount || 0);
+                setEl('stat-chunk-status', `${msg.successfulChunks} ok / ${msg.failedChunks} failed`);
+                if (aiStartTime) {
+                    // Sync the timer with the authoritative server-side value
+                    aiStartTime = Date.now() - (msg.elapsedSecs * 1000);
+                }
+            }
+        }
+
+        // --- AI fully complete ---
+        else if (msg.action === 'aiAnalysisComplete') {
+            const elapsed = msg.stats?.elapsed || '?';
+            const jobCount = msg.stats?.jobsAnalyzed || '?';
+            console.log(`[SidePanel] AI analysis complete in ${elapsed}s for ${jobCount} jobs`);
+            
+            // Stop the live timer
+            if (aiLiveTimer) { clearInterval(aiLiveTimer); aiLiveTimer = null; }
+            
+            hideProgress('analyze');
+            const statsPanel = document.getElementById('ai-live-stats');
+            if (statsPanel) statsPanel.style.display = 'none';
+            document.getElementById('btn-analyze').disabled = false;
+            
+            if (msg.success) {
+                currentKeywords = msg.data;
+                displayKeywords(currentKeywords);
+            } else {
+                showError('AI Analysis failed: ' + msg.error, 'analyze');
+            }
+        }
+    });
+
     console.log('[SidePanel] Initialization complete.');
   } catch (err) {
     console.error('[SidePanel] Initialization failed:', err);
@@ -61,12 +146,17 @@ function setupEventListeners() {
   };
 
   bindClick('btn-scrape', handleScrape);
-  bindClick('btn-scrape-only', handleScrapeOnly);
-  bindClick('btn-export', handleExport);
+  bindClick('btn-analyze', handleAnalyze);
   bindClick('btn-clear-storage', handleClearStorage);
   bindClick('btn-copy-keywords', handleCopyKeywords);
   bindClick('btn-clear-highlights', handleClearHighlights);
   bindClick('btn-view-analytics', handleOpenAnalytics);
+
+  // Settings Auto-Save
+  const savePrefsHandler = () => savePreferences();
+  document.getElementById('pref-custom-emojis').addEventListener('input', savePrefsHandler);
+  document.getElementById('pref-min-freq').addEventListener('change', savePrefsHandler);
+  document.getElementById('pref-highlight').addEventListener('change', savePrefsHandler);
 
   // Result Tabs
   document.querySelectorAll('.tab-bar .tab').forEach(btn => {
@@ -105,7 +195,8 @@ async function checkCurrentPage() {
     console.log('[SidePanel] Not an Upwork page:', tab.url);
     document.getElementById('scrape-hint').textContent = 'Open an Upwork job search page';
     document.getElementById('btn-scrape').disabled = true;
-    document.getElementById('btn-scrape-only').disabled = true;
+    const btnScrapeOnly = document.getElementById('btn-scrape-only');
+    if (btnScrapeOnly) btnScrapeOnly.disabled = true;
     return;
   }
 
@@ -151,20 +242,20 @@ async function injectAndRetry(tab) {
 
 function updateUIReadyState(isSearch) {
     document.getElementById('btn-scrape').disabled = false;
-    document.getElementById('btn-scrape-only').disabled = false;
+    const btnScrapeOnly = document.getElementById('btn-scrape-only');
+    if (btnScrapeOnly) btnScrapeOnly.disabled = false;
     document.getElementById('scrape-hint').innerHTML = isSearch 
         ? '<span style="color: #14a800">● Ready to Scrape</span>' 
         : '<span style="color: #58a6ff">● Page Linked (Generic)</span>';
 }
 
 async function handleScrape() {
-  console.log('[SidePanel] handleScrape invoked');
+  console.log('[SidePanel] handleScrape (Extraction) invoked');
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) return showError('No active tab available.');
+  if (!tab) return showError('No active tab available.', 'scrape');
   
-  showProgress('Starting full analysis...');
+  showProgress('Extracting raw job data...', 'scrape');
   document.getElementById('btn-scrape').disabled = true;
-  document.getElementById('btn-scrape-only').disabled = true;
   
   try {
       console.log('[SidePanel] Sending startScrape message...');
@@ -177,53 +268,7 @@ async function handleScrape() {
       
       const { jobs, pageUrl } = scrapeResponse;
       console.log(`[SidePanel] Processing ${jobs.length} jobs`);
-      updateProgress(`Found ${jobs.length} jobs. Saving...`);
-      
-      const session = buildSessionObject(jobs, pageUrl);
-      await chrome.runtime.sendMessage({ action: 'saveSession', sessionData: session });
-      
-      updateProgress('Analyzing keywords with AI...');
-      const keywordsResponse = await chrome.runtime.sendMessage({ action: 'analyzeKeywords', jobs });
-      
-      if (keywordsResponse.success) {
-        currentKeywords = keywordsResponse.data;
-        displayKeywords(currentKeywords);
-        switchView('results');
-        
-        if (document.getElementById('pref-highlight').checked) {
-          console.log('[SidePanel] Triggering page highlights');
-          const allKeywords = [...(currentKeywords.skillKeywords || []), ...(currentKeywords.titleKeywords || [])];
-          await chrome.tabs.sendMessage(tab.id, { action: 'highlightKeywords', keywords: allKeywords });
-        }
-      } else {
-          throw new Error(keywordsResponse.error);
-      }
-  } catch (err) {
-      console.error('[SidePanel] Scrape failed:', err);
-      showError('Scrape failed: ' + err.message);
-  } finally {
-      hideProgress();
-      document.getElementById('btn-scrape').disabled = false;
-      document.getElementById('btn-scrape-only').disabled = false;
-      loadStats();
-  }
-}
-
-async function handleScrapeOnly() {
-  console.log('[SidePanel] handleScrapeOnly (Raw Extraction) invoked');
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) return;
-  
-  showProgress('Extracting raw job data...');
-  document.getElementById('btn-scrape').disabled = true;
-  document.getElementById('btn-scrape-only').disabled = true;
-  
-  try {
-      const scrapeResponse = await chrome.tabs.sendMessage(tab.id, { action: 'startScrape' });
-      if (!scrapeResponse?.success) throw new Error(scrapeResponse?.error || 'Extraction failed');
-      
-      const { jobs, pageUrl } = scrapeResponse;
-      updateProgress(`Saving ${jobs.length} jobs to history...`);
+      updateProgress(`Found ${jobs.length} jobs. Saving...`, 'scrape');
       
       const session = buildSessionObject(jobs, pageUrl);
       await chrome.runtime.sendMessage({ action: 'saveSession', sessionData: session });
@@ -231,13 +276,54 @@ async function handleScrapeOnly() {
       console.log('[SidePanel] Raw extraction saved to storage');
       alert(`Successfully extracted ${jobs.length} jobs to local storage!`);
   } catch (err) {
-      console.error('[SidePanel] Extraction error:', err);
-      showError('Extraction failed: ' + err.message);
+      console.error('[SidePanel] Scrape failed:', err);
+      showError('Scrape failed: ' + err.message, 'scrape');
   } finally {
-      hideProgress();
+      hideProgress('scrape');
       document.getElementById('btn-scrape').disabled = false;
-      document.getElementById('btn-scrape-only').disabled = false;
       loadStats();
+  }
+}
+
+async function handleAnalyze() {
+  console.log('[SidePanel] handleAnalyze invoked');
+  
+  showProgress('Computing Auto Algorithm results...', 'analyze');
+  document.getElementById('btn-analyze').disabled = true;
+  
+  try {
+      const keywordsResponse = await chrome.runtime.sendMessage({ action: 'analyzeAllKeywords' });
+      
+      if (keywordsResponse.success) {
+        currentKeywords = keywordsResponse.data;
+        displayKeywords(currentKeywords);
+        
+        if (document.getElementById('pref-highlight').checked) {
+          console.log('[SidePanel] Triggering page highlights');
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tab && tab.url && tab.url.includes('upwork.com')) {
+              const algoData = currentKeywords.algorithm || currentKeywords;
+              const allKeywords = [...(algoData.skillKeywords || []), ...(algoData.titleKeywords || [])];
+              await chrome.tabs.sendMessage(tab.id, { action: 'highlightKeywords', keywords: allKeywords });
+          }
+        }
+        
+        if (keywordsResponse.aiRunning) {
+            showProgress('Deep AI Analysis running in background...', 'analyze');
+            // Do NOT re-enable the button or hide progress yet.
+        } else {
+            hideProgress('analyze');
+            document.getElementById('btn-analyze').disabled = false;
+        }
+        
+      } else {
+          throw new Error(keywordsResponse.error);
+      }
+  } catch (err) {
+      console.error('[SidePanel] Analyze failed:', err);
+      showError('Analyze failed: ' + err.message, 'analyze');
+      hideProgress('analyze');
+      document.getElementById('btn-analyze').disabled = false;
   }
 }
 
@@ -255,28 +341,55 @@ function buildSessionObject(jobs, pageUrl) {
     };
 }
 
-function showProgress(text) {
-  const el = document.getElementById('scrape-progress');
+function showProgress(text, context = 'scrape') {
+  const progressId = context === 'scrape' ? 'scrape-progress' : 'analyze-progress';
+  const textId = context === 'scrape' ? 'progress-text' : 'analyze-progress-text';
+  const el = document.getElementById(progressId);
   if (el) {
-    el.style.display = 'block';
-    document.getElementById('progress-text').textContent = text;
+    // analyze-progress is a flex child, use flex; scrape uses block
+    el.style.display = context === 'analyze' ? 'flex' : 'block';
+    el.style.flexDirection = 'column';
+    const textEl = document.getElementById(textId);
+    if (textEl) textEl.textContent = text;
   }
 }
 
-function updateProgress(text) {
-  const el = document.getElementById('progress-text');
+function updateProgress(text, context = 'scrape', percent = null) {
+  const textId = context === 'scrape' ? 'progress-text' : 'analyze-progress-text';
+  const fillId = context === 'scrape' ? null : 'analyze-progress-fill';
+  const el = document.getElementById(textId);
   if (el) el.textContent = text;
+
+  // Also ensure analyze-progress container is shown
+  if (context === 'analyze') {
+    const progressEl = document.getElementById('analyze-progress');
+    if (progressEl && progressEl.style.display === 'none') {
+      progressEl.style.display = 'flex';
+      progressEl.style.flexDirection = 'column';
+    }
+  }
+  
+  if (percent !== null) {
+    const fillEl = fillId
+        ? document.getElementById(fillId)
+        : document.querySelector('#scrape-progress .progress-fill');
+    if (fillEl) {
+        fillEl.style.width = `${percent}%`;
+        fillEl.style.animation = 'none';
+    }
+  }
 }
 
-function hideProgress() {
-  const el = document.getElementById('scrape-progress');
+function hideProgress(context = 'scrape') {
+  const progressId = context === 'scrape' ? 'scrape-progress' : 'analyze-progress';
+  const el = document.getElementById(progressId);
   if (el) el.style.display = 'none';
 }
 
-function showError(msg) {
+function showError(msg, context = 'scrape') {
   console.error('[SidePanel UI Error]', msg);
   alert(msg);
-  hideProgress();
+  hideProgress(context);
 }
 
 async function loadStats() {
@@ -284,29 +397,42 @@ async function loadStats() {
   const res = await chrome.runtime.sendMessage({ action: 'getStats' });
   if (res.success && res.stats) {
      const stats = res.stats;
-     document.getElementById('stat-sessions').textContent = stats.sessionCount;
      document.getElementById('stat-jobs').textContent = stats.totalJobs;
+     const kfTotalJobs = document.getElementById('kf-total-jobs');
+     if (kfTotalJobs) kfTotalJobs.textContent = stats.totalJobs;
      
-     const sessionsRes = await chrome.runtime.sendMessage({ action: 'getSessions' });
-     if (sessionsRes.success && sessionsRes.sessions.length > 0) {
-         document.getElementById('stat-last-count').textContent = sessionsRes.sessions[0].jobCount;
+      if (stats.lastExtraction) {
+         const d = new Date(stats.lastExtraction.timestamp);
+         document.getElementById('stat-last-extracted-time').textContent = 
+            `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+         document.getElementById('stat-last-count').textContent = stats.lastExtraction.newJobsAdded || stats.lastExtraction.jobCount;
+     } else {
+         document.getElementById('stat-last-extracted-time').textContent = 'Never';
+         document.getElementById('stat-last-count').textContent = '0';
      }
+     
+     document.getElementById('home-stats').style.display = 'grid';
   }
 }
 
 async function loadHistory() {
-  console.log('[SidePanel] Loading scrape history');
-  const res = await chrome.runtime.sendMessage({ action: 'getSessions' });
+  console.log('[SidePanel] Loading extraction history');
+  const res = await chrome.runtime.sendMessage({ action: 'getHistory' });
   if (res.success) {
      const container = document.getElementById('history-list');
+     if (!container) return;
      container.innerHTML = '';
-     res.sessions.forEach(session => {
+     if (res.history.length === 0) {
+         container.innerHTML = '<div style="padding: 1rem; color: #8b949e">No history yet</div>';
+         return;
+     }
+     res.history.forEach(session => {
         const div = document.createElement('div');
         div.className = 'history-item';
         div.innerHTML = `
           <strong>${session.searchQuery}</strong><br/>
-          <small>${new Date(session.scrapedAt).toLocaleTimeString()}</small>
-          <span style="float: right">${session.jobCount} jobs</span>
+          <small>${new Date(session.timestamp).toLocaleTimeString()} - ${new Date(session.timestamp).toLocaleDateString()}</small>
+          <span style="float: right">${session.jobCount} jobs (${session.newJobsAdded} new)</span>
         `;
         container.appendChild(div);
      });
@@ -318,20 +444,35 @@ function displayKeywords(data) {
   const noRes = document.getElementById('no-results-msg');
   const content = document.getElementById('results-content');
   if (noRes) noRes.style.display = 'none';
-  if (content) content.style.display = 'block';
+  if (content) content.style.display = 'flex';  // flex to fill available height in column layout
   
   const methodEl = document.getElementById('results-method');
-  if (methodEl) methodEl.textContent = `Method: ${data.method}`;
+  if (methodEl) {
+      const aiPending = data.method === 'algorithm';
+      methodEl.innerHTML = `Method: <strong>${data.method === 'both' ? '🤖 Algorithm + AI' : '⚙️ Algorithm only'}</strong>${aiPending ? ' &nbsp;<em style="color:#888;font-size:11px;">(AI running…)</em>' : ''}`;
+  }
   
-  renderKeywordList('tab-skills', data.skillKeywords);
-  renderKeywordList('tab-titles', data.titleKeywords);
-  renderKeywordList('tab-phrases', data.actionPhrases);
+  const algoData = data.algorithm || data; // fallback just in case
+  const aiData = data.ai || null;
+  
+  renderKeywordList('col-skills-algo', algoData.skillKeywords);
+  renderKeywordList('col-titles-algo', algoData.titleKeywords);
+  renderKeywordList('col-phrases-algo', algoData.actionPhrases);
+
+  // AI columns: show placeholder if AI hasn't finished yet
+  renderKeywordList('col-skills-ai', aiData?.skillKeywords, !aiData);
+  renderKeywordList('col-titles-ai', aiData?.titleKeywords, !aiData);
+  renderKeywordList('col-phrases-ai', aiData?.actionPhrases, !aiData);
 }
 
-function renderKeywordList(containerId, items) {
-  const container = document.getElementById(containerId);
+function renderKeywordList(containerId, items, pending = false) {
+  const container = document.querySelector(`#${containerId} .kw-list`);
   if (!container) return;
   container.innerHTML = '';
+  if (pending) {
+     container.innerHTML = '<div style="padding: 1rem; color: #888; font-style: italic; text-align:center;">⏳ AI analyzing…</div>';
+     return;
+  }
   if (!items || items.length === 0) {
      container.innerHTML = '<div style="padding: 1rem; color: #8b949e">No results found</div>';
      return;
@@ -344,13 +485,10 @@ function renderKeywordList(containerId, items) {
   });
 }
 
-async function handleExport() {
-  console.log('[SidePanel] Triggering JSON export');
-  await chrome.runtime.sendMessage({ action: 'exportJSON' });
-}
+
 
 async function handleClearStorage() {
-  if (confirm('Permanently delete all scrape history?')) {
+  if (confirm('Permanently delete all scraped data? This cannot be undone.')) {
      console.log('[SidePanel] Clearing storage');
      await chrome.storage.local.clear();
      await loadStats();
@@ -368,18 +506,53 @@ async function handleClearHighlights() {
 function handleCopyKeywords() {
   console.log('[SidePanel] Copying keywords to clipboard');
   if (!currentKeywords) return;
-  const allText = [
-     "--- Skills ---",
-     ...(currentKeywords.skillKeywords || []).map(k => `${k.keyword} (${k.count})`),
-     "--- Titles ---",
-     ...(currentKeywords.titleKeywords || []).map(k => `${k.keyword} (${k.count})`),
-     "--- Phrases ---",
-     ...(currentKeywords.actionPhrases || []).map(k => `${k.keyword} (${k.count})`)
-  ].join('\n');
+  const algoData = currentKeywords.algorithm || currentKeywords;
+  const aiData = currentKeywords.ai;
+  
+  let allText = "--- AUTO ALGORITHM ---\n";
+  allText += "--- Skills ---\n" + (algoData.skillKeywords || []).map(k => `${k.keyword} (${k.count})`).join('\n') + '\n';
+  allText += "--- Titles ---\n" + (algoData.titleKeywords || []).map(k => `${k.keyword} (${k.count})`).join('\n') + '\n';
+  allText += "--- Phrases ---\n" + (algoData.actionPhrases || []).map(k => `${k.keyword} (${k.count})`).join('\n') + '\n';
+
+  if (aiData) {
+      allText += "\n--- AI RESULTS ---\n";
+      allText += "--- Skills ---\n" + (aiData.skillKeywords || []).map(k => `${k.keyword} (${k.count})`).join('\n') + '\n';
+      allText += "--- Titles ---\n" + (aiData.titleKeywords || []).map(k => `${k.keyword} (${k.count})`).join('\n') + '\n';
+      allText += "--- Phrases ---\n" + (aiData.actionPhrases || []).map(k => `${k.keyword} (${k.count})`).join('\n') + '\n';
+  }
+
   navigator.clipboard.writeText(allText).then(() => alert('Keywords copied!'));
 }
 
 function handleOpenAnalytics() {
   console.log('[SidePanel] Opening analytics dashboard tab');
   chrome.tabs.create({ url: chrome.runtime.getURL('analytics/analytics.html') });
+}
+
+// Settings Preferences
+const PREFS_KEY = 'userPreferences';
+
+async function loadPreferences() {
+  const data = await chrome.storage.local.get(PREFS_KEY);
+  const prefs = data[PREFS_KEY] || {};
+  
+  const defaultEmojis = "⚡,⭐,🔥,🚀,💡,📌,❗,✅,❌,🛠️,💻,📈";
+  const customEmojisEl = document.getElementById('pref-custom-emojis');
+  if (customEmojisEl) customEmojisEl.value = prefs.customEmojis || defaultEmojis;
+  
+  const minFreqEl = document.getElementById('pref-min-freq');
+  if (minFreqEl && prefs.minFrequency !== undefined) minFreqEl.value = prefs.minFrequency;
+  
+  const highlightEl = document.getElementById('pref-highlight');
+  if (highlightEl && prefs.highlightEnabled !== undefined) highlightEl.checked = prefs.highlightEnabled;
+}
+
+async function savePreferences() {
+  const prefs = {
+    customEmojis: document.getElementById('pref-custom-emojis').value,
+    minFrequency: parseInt(document.getElementById('pref-min-freq').value, 20),
+    highlightEnabled: document.getElementById('pref-highlight').checked
+  };
+  await chrome.storage.local.set({ [PREFS_KEY]: prefs });
+  console.log('[SidePanel] Saved preferences:', prefs);
 }

@@ -1,14 +1,16 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="sidepanel.css">
   <title>Upwork Keyword Finder</title>
 </head>
+
 <body>
   <div id="app">
-    
+
     <!-- Header -->
     <header class="sp-header">
       <div class="sp-logo">🔍 Keyword Finder</div>
@@ -18,34 +20,33 @@
     <!-- Nav Tabs -->
     <nav class="sp-nav">
       <button class="nav-tab active" data-view="home">Home</button>
-      <button class="nav-tab" data-view="results">Results</button>
       <button class="nav-tab" data-view="history">History</button>
+      <button class="nav-tab" data-view="results">Keyword Finder</button>
       <button class="nav-tab" data-view="settings">Settings</button>
     </nav>
 
     <!-- View: Home -->
-    <div id="view-home" class="view active">
+    <div id="view-home" class="view active" style="overflow-y:auto;">
       <div id="page-status"></div>
-      
+
       <div class="scrape-section">
         <button id="btn-scrape" class="btn btn-primary">
-          🕷️ Scrape & Analyze Keywords
-        </button>
-        <button id="btn-scrape-only" class="btn btn-secondary" style="margin-top: 10px;">
-          📥 Scrape & Save Data Only (No AI)
+          🕷️ Extract Jobs from Page
         </button>
         <p class="hint" id="scrape-hint">Navigate to an Upwork job search page first</p>
       </div>
-      
+
       <div id="scrape-progress" style="display:none">
-        <div class="progress-bar"><div class="progress-fill"></div></div>
+        <div class="progress-bar">
+          <div class="progress-fill"></div>
+        </div>
         <p id="progress-text">Scraping jobs...</p>
       </div>
-      
-      <div id="home-stats" class="stats-grid" style="display:none">
-        <div class="stat-card">
-          <span class="stat-number" id="stat-sessions">0</span>
-          <span class="stat-label">Scrape Sessions</span>
+
+      <div id="home-stats" class="stats-grid" style="display:none; margin-top: 20px;">
+        <div class="stat-card" style="grid-column: 1 / -1;">
+          <span class="stat-label">Last Extraction</span>
+          <span class="stat-number" id="stat-last-extracted-time" style="font-size: 1rem;">Never</span>
         </div>
         <div class="stat-card">
           <span class="stat-number" id="stat-jobs">0</span>
@@ -53,55 +54,137 @@
         </div>
         <div class="stat-card">
           <span class="stat-number" id="stat-last-count">0</span>
-          <span class="stat-label">Jobs Last Scrape</span>
+          <span class="stat-label">Jobs Added</span>
         </div>
+      </div>
+
+      <div class="dashboard-section" style="margin-top: 20px;">
+        <button id="btn-view-analytics" class="btn btn-primary"
+          style="background-color: var(--primary-color); width: 100%; padding: 12px; font-weight: bold;">
+          📊 Open Analytics Dashboard
+        </button>
       </div>
     </div>
 
-    <!-- View: Results -->
-    <div id="view-results" class="view">
-      <div id="no-results-msg">Run a scrape to see results</div>
-      
-      <div id="results-content" style="display:none">
-        <div class="results-meta">
+    <!-- View: History -->
+    <div id="view-history" class="view" style="overflow-y:auto;">
+      <div class="history-header">
+        <h3>Extraction History</h3>
+      </div>
+      <div id="history-list">
+        <!-- Populated via JS -->
+      </div>
+    </div>
+
+    <!-- View: Keyword Finder (was Results) -->
+    <div id="view-results" class="view" style="position:relative; overflow:auto; display:flex; flex-direction:column;">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <h2 style="margin: 0; color: var(--primary);"><span id="kf-total-jobs">0</span></h2>
+        <span style="font-size: 12px; color: var(--text-light);">Jobs in Database</span>
+        <button id="btn-analyze" class="btn btn-primary" style="margin-top: 15px;">
+          🧠 Start Analyzing
+        </button>
+      </div>
+
+      <div id="no-results-msg">Click 'Start Analyzing' to see keywords</div>
+
+      <!-- AI Progress — sticky bottom banner, overlays on top of results -->
+      <div id="analyze-progress" style="display:none; flex-shrink:0;
+           background:#fff; border-top:2px solid var(--primary); padding:10px 16px;margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+          <div class="progress-bar" style="flex:1; margin-top:0;">
+            <div class="progress-fill" id="analyze-progress-fill"></div>
+          </div>
+          <span id="analyze-progress-text" style="font-size:11px; font-weight:bold;
+               white-space:nowrap; color:var(--primary); min-width:60px; text-align:right;">
+            Analyzing…
+          </span>
+        </div>
+        <div id="ai-live-stats" style="display:none; background:#1a1a2e; color:white;
+             border-radius:6px; padding:8px 10px; font-size:11px; line-height:1.7;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px 10px;">
+            <span>📦 Chunks: <strong id="stat-chunks">—</strong></span>
+            <span>⏱️ Elapsed: <strong id="stat-elapsed">0s</strong></span>
+            <span>🧩 Skills: <strong id="stat-skills-running">—</strong></span>
+            <span>📊 <strong id="stat-chunk-status">—</strong></span>
+          </div>
+          <div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.1);
+               padding-top:4px; font-size:10px; color:#ccc;">
+            🤖 <span id="stat-current-titles" style="font-style:italic;">Waiting for AI…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Results shown immediately after algorithm runs -->
+      <div id="results-content" style="display:none; flex-direction:column;">
+        <div class="results-meta" style="margin-bottom:8px;">
           <span id="results-count"></span>
           <span id="results-method"></span>
         </div>
-        
+
         <div class="tab-bar">
           <button class="tab active" data-tab="skills">Skills & Tech</button>
           <button class="tab" data-tab="titles">Title Words</button>
           <button class="tab" data-tab="phrases">Phrases</button>
         </div>
 
-        <div id="tab-skills" class="tab-content active"></div>
-        <div id="tab-titles" class="tab-content"></div>
-        <div id="tab-phrases" class="tab-content"></div>
-        
+        <div id="tab-skills" class="tab-content active">
+          <div class="result-columns">
+            <div class="result-col" id="col-skills-algo">
+              <h4>Auto Algorithm</h4>
+              <div class="kw-list"></div>
+            </div>
+            <div class="result-col" id="col-skills-ai">
+              <h4>AI Results</h4>
+              <div class="kw-list"></div>
+            </div>
+          </div>
+        </div>
+        <div id="tab-titles" class="tab-content">
+          <div class="result-columns">
+            <div class="result-col" id="col-titles-algo">
+              <h4>Auto Algorithm</h4>
+              <div class="kw-list"></div>
+            </div>
+            <div class="result-col" id="col-titles-ai">
+              <h4>AI Results</h4>
+              <div class="kw-list"></div>
+            </div>
+          </div>
+        </div>
+        <div id="tab-phrases" class="tab-content">
+          <div class="result-columns">
+            <div class="result-col" id="col-phrases-algo">
+              <h4>Auto Algorithm</h4>
+              <div class="kw-list"></div>
+            </div>
+            <div class="result-col" id="col-phrases-ai">
+              <h4>AI Results</h4>
+              <div class="kw-list"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="actions-row">
           <button id="btn-copy-keywords" class="btn btn-secondary">📋 Copy Keywords</button>
           <button id="btn-clear-highlights" class="btn btn-secondary">✕ Clear Highlights</button>
         </div>
       </div>
+
+
     </div>
 
-    <!-- View: History -->
-    <div id="view-history" class="view">
-      <div class="history-header">
-        <h3>Scrape History</h3>
-        <div class="actions-row" style="margin-top: 10px; gap: 5px; display: flex;">
-          <button id="btn-export" class="btn btn-secondary">⬇️ Export JSON</button>
-          <button id="btn-view-analytics" class="btn btn-primary" style="flex: 1;">📊 Insights Dashboard</button>
-        </div>
-      </div>
-      <div id="history-list"></div>
-    </div>
 
     <!-- View: Settings -->
-    <div id="view-settings" class="view">
+    <div id="view-settings" class="view" style="overflow-y:auto;">
+      <div class="setting-row">
+        <label>Custom Toolbar Emojis</label>
+        <br />
+        <textarea rows="4" id="pref-custom-emojis" value="⚡,⭐,🔥,🚀,💡,📌,❗,✅,❌,🛠️,💻,📈"></textarea>
+      </div>
       <div class="setting-row">
         <label>Min keyword frequency</label>
-        <input type="number" id="pref-min-freq" min="1" max="20" value="10">
+        <input type="number" id="pref-min-freq" min="1" max="30" value="20">
       </div>
       <div class="setting-row">
         <label>Highlight keywords on page</label>
@@ -111,8 +194,9 @@
         <button id="btn-clear-storage" class="btn btn-danger">🗑️ Clear All Stored Data</button>
       </div>
     </div>
-    
+
   </div>
   <script src="sidepanel.js"></script>
 </body>
+
 </html>

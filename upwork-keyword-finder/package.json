@@ -3,7 +3,6 @@
   "version": "2.1.0",
   "description": "Scrape, store, and analyze Upwork job listings.",
   "scripts": {
-    "consolidate": "node analytics/consolidate.js"
   },
   "author": "",
   "license": "ISC"
