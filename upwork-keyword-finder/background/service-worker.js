@@ -9,6 +9,8 @@ import {
 } from "../lib/storage-manager.js";
 import { computeTFIDF } from "../lib/keyword-algorithm.js";
 
+const AI_CACHE_KEY = 'aiJobKeywords';
+
 // Open side panel when extension icon is clicked
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
@@ -118,17 +120,31 @@ async function runAIBackground(masterJobs, algorithmData) {
       latestJobs.slice(0, 3).map((j) => j.title),
     );
 
-    console.log(`[AI Background] Creating/reusing AI session...`);
-    const session = await getAISession();
-    console.log(
-      `[AI Background] AI session ready. Starting keyword extraction...`,
-    );
+    console.log(`[AI Background] Checking cache for processed jobs...`);
+    const storage = await chrome.storage.local.get(AI_CACHE_KEY);
+    const aiCache = storage[AI_CACHE_KEY] || {};
+    
+    const unprocessedJobs = latestJobs.filter(j => !aiCache[j.jobId]);
+    console.log(`[AI Background] Cache hit: ${latestJobs.length - unprocessedJobs.length}, New jobs to analyze: ${unprocessedJobs.length}`);
 
-    const aiResult = await extractKeywordsWithAI(
-      latestJobs,
-      session,
-      startTime,
-    );
+    if (unprocessedJobs.length > 0) {
+      console.log(`[AI Background] Creating/reusing AI session...`);
+      const session = await getAISession();
+      
+      const newResults = await extractKeywordsWithAI(
+        unprocessedJobs,
+        session,
+        startTime,
+      );
+      
+      // Update cache
+      Object.assign(aiCache, newResults);
+      await chrome.storage.local.set({ [AI_CACHE_KEY]: aiCache });
+      console.log(`[AI Background] Cache updated with ${Object.keys(newResults).length} new job results.`);
+    }
+
+    // Aggregate results for the latest 100 jobs from cache
+    const aiResult = aggregateAIResults(latestJobs, aiCache);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(
@@ -237,7 +253,7 @@ When given job data, identify and return keywords in valid JSON only. No other t
 }
 
 async function extractKeywordsWithAI(jobs, session, startTime = Date.now()) {
-  const CHUNK_SIZE = 5;
+  const CHUNK_SIZE = 10;
   const totalChunks = Math.ceil(jobs.length / CHUNK_SIZE);
   const allResults = {
     skillKeywords: {},
@@ -264,23 +280,21 @@ async function extractKeywordsWithAI(jobs, session, startTime = Date.now()) {
     const jobsText = chunk
       .map(
         (job, idx) =>
-          `[JOB ${i + idx + 1}]\nTitle: ${job.title}\nDesc: ${job.description.substring(0, 300)}\nSkills: ${(job.skills || []).join(", ")}`,
+          `[J${i + idx + 1}] T: ${job.title.substring(0, 80)} | S: ${(job.skills || []).slice(0, 6).join(", ")} | D: ${job.description.substring(0, 60)}`,
       )
-      .join("\n\n");
+      .join("\n");
 
-    const prompt = `Analyze these ${chunk.length} Upwork job listings. Extract keywords.
-
+    const prompt = `Extract keywords for EACH job separately.
 ${jobsText}
 
-Return ONLY valid JSON, no markdown, no explanation:
+Return ONLY valid JSON (no markdown):
 {
-  "skillKeywords": [{"keyword": "React", "count": 3, "importance": "high"}],
-  "titleKeywords": [{"keyword": "Developer Needed", "count": 5, "importance": "high"}],
-  "actionPhrases": [{"keyword": "looking for", "count": 4, "importance": "medium"}]
+  "1": {"s":["React"], "t":["Web Dev"], "p":["fixed budget"]},
+  "2": {"s":["Node.js"], "t":["Backend"], "p":["ASAP"]}
 }
-Rules: skillKeywords=tech/tools, titleKeywords=noun phrases from titles, actionPhrases=what clients want. importance: high/medium/low.`;
+Rules: s=tech skills, t=job title keywords, p=action phrases. Key is the job number.`;
 
-    // Broadcast BEFORE calling AI so UI immediately shows what's being processed
+    // Broadcast BEFORE calling AI
     const preProgressMsg = {
       action: "chunkStarted",
       chunkIndex,
@@ -288,78 +302,92 @@ Rules: skillKeywords=tech/tools, titleKeywords=noun phrases from titles, actionP
       jobsInChunk: chunk.length,
       jobRange: `${i + 1}–${Math.min(i + CHUNK_SIZE, jobs.length)}`,
       currentJobTitles: chunk.map((j) => j.title.substring(0, 50)),
-      processed: i, // jobs processed so far (before this chunk)
+      processed: i,
       total: jobs.length,
       elapsedSecs: parseInt(((Date.now() - startTime) / 1000).toFixed(0)),
     };
-    console.log(
-      `[AI Extraction] Broadcasting chunkStarted for chunk ${chunkIndex}/${totalChunks}: jobs ${preProgressMsg.jobRange}`,
-    );
     chrome.runtime.sendMessage(preProgressMsg).catch(() => {});
 
     try {
-      console.log(
-        `[AI Extraction] Chunk ${chunkIndex}: Sending prompt (${prompt.length} chars) to AI...`,
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('AI prompt timeout')), 60000)
       );
-      const response = await session.prompt(prompt);
-      const chunkElapsed = ((Date.now() - chunkStartTime) / 1000).toFixed(1);
-      console.log(
-        `[AI Extraction] Chunk ${chunkIndex}: AI responded in ${chunkElapsed}s (${response.length} chars)`,
-      );
+      
+      const response = await Promise.race([
+        session.prompt(prompt),
+        timeoutPromise
+      ]);
 
       const cleaned = response.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(cleaned);
-      mergeKeywordResults(allResults, parsed);
+      
+      // Map back to job IDs
+      chunk.forEach((job, idx) => {
+        const jobIdx = i + idx + 1;
+        const result = parsed[jobIdx.toString()] || parsed[jobIdx];
+        if (result) {
+          allResults[job.jobId] = {
+            s: Array.isArray(result.s) ? result.s : [],
+            t: Array.isArray(result.t) ? result.t : [],
+            p: Array.isArray(result.p) ? result.p : []
+          };
+        }
+      });
+      
       successfulChunks++;
-
-      const skillCount = Object.keys(allResults.skillKeywords).length;
-      const titleCount = Object.keys(allResults.titleKeywords).length;
-      console.log(
-        `[AI Extraction] Chunk ${chunkIndex}: OK. Running totals — skills: ${skillCount}, titles: ${titleCount}`,
-      );
     } catch (err) {
       failedChunks++;
-      console.warn(
-        `[AI Extraction] Chunk ${chunkIndex}: FAILED — ${err.name}: ${err.message}`,
-      );
-      if (err.name === "SyntaxError") {
-        console.warn(
-          `[AI Extraction] Chunk ${chunkIndex}: JSON parse error — AI may have returned non-JSON response`,
-        );
-      }
+      console.warn(`[AI Extraction] Chunk ${chunkIndex} FAILED:`, err.message);
     }
 
     const processed = Math.min(i + CHUNK_SIZE, jobs.length);
-    const elapsedSecs = ((Date.now() - startTime) / 1000).toFixed(0);
-    const skillCount = Object.keys(allResults.skillKeywords).length;
     const progressMsg = {
       action: "analyzeProgress",
       processed,
       total: jobs.length,
       chunkIndex,
       totalChunks,
-      elapsedSecs: parseInt(elapsedSecs),
+      elapsedSecs: parseInt(((Date.now() - startTime) / 1000).toFixed(0)),
       successfulChunks,
-      failedChunks,
-      runningSkillCount: skillCount,
-      currentJobTitles: chunk.map((j) => j.title.substring(0, 50)),
+      failedChunks
     };
-    console.log(
-      `[AI Extraction] Progress broadcast: ${processed}/${jobs.length} (${elapsedSecs}s elapsed, ${skillCount} skills so far)`,
-    );
     chrome.runtime.sendMessage(progressMsg).catch(() => {});
   }
 
-  console.log(`[AI Extraction] ===== EXTRACTION DONE =====`);
-  console.log(
-    `[AI Extraction] Successful: ${successfulChunks}/${totalChunks} chunks, Failed: ${failedChunks}`,
-  );
+  return allResults;
+}
+
+function aggregateAIResults(jobs, cache) {
+  const aggregated = {
+    skillKeywords: {},
+    titleKeywords: {},
+    actionPhrases: {}
+  };
+
+  jobs.forEach(job => {
+    const res = cache[job.jobId];
+    if (!res) return;
+
+    res.s.forEach(kw => updateCount(aggregated.skillKeywords, kw));
+    res.t.forEach(kw => updateCount(aggregated.titleKeywords, kw));
+    res.p.forEach(kw => updateCount(aggregated.actionPhrases, kw));
+  });
 
   return {
-    skillKeywords: topN(allResults.skillKeywords, 20),
-    titleKeywords: topN(allResults.titleKeywords, 20),
-    actionPhrases: topN(allResults.actionPhrases, 15),
+    skillKeywords: topN(aggregated.skillKeywords, 20),
+    titleKeywords: topN(aggregated.titleKeywords, 20),
+    actionPhrases: topN(aggregated.actionPhrases, 15)
   };
+}
+
+function updateCount(obj, keyword) {
+  const key = keyword.toLowerCase().trim();
+  if (!key) return;
+  if (obj[key]) {
+    obj[key].count++;
+  } else {
+    obj[key] = { keyword: keyword.trim(), count: 1 };
+  }
 }
 
 function mergeKeywordResults(accumulated, newChunk) {
@@ -386,5 +414,13 @@ self.addEventListener("suspend", () => {
   if (aiSession && typeof aiSession.destroy === "function") {
     aiSession.destroy();
     aiSession = null;
+  }
+});
+
+// Step 4: Pre-warm AI session on load if available
+checkAIAvailability().then(status => {
+  if (status.available && !status.needsDownload) {
+    console.log("[Background] Pre-warming AI session...");
+    getAISession().catch(err => console.warn("[Background] Pre-warm failed:", err.message));
   }
 });

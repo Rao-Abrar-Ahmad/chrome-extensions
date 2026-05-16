@@ -1,4 +1,4 @@
-## Complete Build Specification v2.2
+## Complete Build Specification v2.3
 ### Agent-Ready Documentation (for Claude Code or any AI agent)
 
 ---
@@ -802,6 +802,8 @@ The "Export All Jobs" button in the side panel calls `exportAllToJSON()`. This c
 import { saveSession, getStorageStats, saveKeywordAnalysis, getMasterJobs, getExtractionHistory } from '../lib/storage-manager.js';
 import { computeTFIDF } from '../lib/keyword-algorithm.js';
 
+const AI_CACHE_KEY = 'aiJobKeywords';
+
 // Open side panel when extension icon is clicked
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
@@ -813,40 +815,12 @@ let aiSession = null;
 
 // Handle messages from content script and side panel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log(`[Background] Received message action: ${message.action}`);
-  
-  if (message.action === 'saveSession') {
-    saveSession(message.sessionData)
-      .then(id => {
-          console.log(`[Background] Session saved: ${id}`);
-          sendResponse({ success: true, sessionId: id })
-      })
-      .catch(err => {
-          console.error('[Background] Session save error:', err);
-          sendResponse({ success: false, error: err.message });
-      });
-    return true;
-  }
-  
-  if (message.action === 'getStats') {
-    getStorageStats()
-      .then(stats => sendResponse({ success: true, stats }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
-  
-  if (message.action === 'getHistory') {
-    getExtractionHistory()
-      .then(history => sendResponse({ success: true, history }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
+  // ... existing handlers (saveSession, getStats, getHistory, checkAI) ...
   
   if (message.action === 'analyzeAllKeywords') {
-    console.log('[Background] Starting global keyword analysis');
     getMasterJobs().then(async masterJobs => {
         try {
-            console.log('[Background] Computing TF-IDF Algorithm on all jobs immediately');
+            // 1. Run Algorithm immediately
             const algoResult = computeTFIDF(masterJobs);
             const algorithmData = {
                 skillKeywords: topN(algoResult.skillKeywords, 20),
@@ -858,26 +832,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const aiStatus = await checkAIAvailability();
             const aiRunning = aiStatus.available;
             
-            console.log(`[Background] Replying immediately with algorithm results. AI running: ${aiRunning}`);
             sendResponse({ success: true, data: initialResult, aiRunning: aiRunning });
             
+            // 2. Trigger AI in background if available
             if (aiRunning) {
                 runAIBackground(masterJobs, algorithmData);
             } else {
                 await saveKeywordAnalysis(initialResult);
             }
         } catch (err) {
-            console.error('[Background] Keyword analysis threw error:', err);
             sendResponse({ success: false, error: err.message });
         }
     });
-    return true;
-  }
-  
-  if (message.action === 'checkAI') {
-    checkAIAvailability()
-      .then(status => sendResponse(status))
-      .catch(() => sendResponse({ available: false }));
     return true;
   }
 });
@@ -888,9 +854,23 @@ async function runAIBackground(masterJobs, algorithmData) {
             .sort((a, b) => new Date(b.scrapedAt) - new Date(a.scrapedAt))
             .slice(0, 100);
             
-        console.log(`[Background] Using AI Model on latest ${latestJobs.length} jobs asynchronously`);
-        const session = await getAISession();
-        const aiResult = await extractKeywordsWithAI(latestJobs, session);
+        // INCREMENTAL PROCESSING (CACHE)
+        const storage = await chrome.storage.local.get(AI_CACHE_KEY);
+        const aiCache = storage[AI_CACHE_KEY] || {};
+        
+        const unprocessedJobs = latestJobs.filter(j => !aiCache[j.jobId]);
+        
+        if (unprocessedJobs.length > 0) {
+            const session = await getAISession();
+            const newResults = await extractKeywordsWithAI(unprocessedJobs, session);
+            
+            // Update Cache
+            Object.assign(aiCache, newResults);
+            await chrome.storage.local.set({ [AI_CACHE_KEY]: aiCache });
+        }
+
+        // AGGREGATE RESULTS FROM CACHE
+        const aiResult = aggregateAIResults(latestJobs, aiCache);
         
         const finalResult = {
             method: 'both',
@@ -899,230 +879,97 @@ async function runAIBackground(masterJobs, algorithmData) {
         };
         
         await saveKeywordAnalysis(finalResult);
-        console.log('[Background] AI analysis complete, broadcasting to UI.');
-        
-        chrome.runtime.sendMessage({ 
-            action: 'aiAnalysisComplete', 
-            success: true, 
-            data: finalResult 
-        }).catch(err => console.log('[Background] UI might be closed, ignoring broadcast err.', err));
+        chrome.runtime.sendMessage({ action: 'aiAnalysisComplete', success: true, data: finalResult });
         
     } catch (err) {
-        console.warn('[Background] AI analysis failed in background:', err);
-        chrome.runtime.sendMessage({ 
-            action: 'aiAnalysisComplete', 
-            success: false, 
-            error: err.message 
-        }).catch(e => {});
+        chrome.runtime.sendMessage({ action: 'aiAnalysisComplete', success: false, error: err.message });
     }
 }
 
-async function checkAIAvailability() {
-  if (!('LanguageModel' in self) && !('ai' in self)) {
-    return { available: false, reason: 'LanguageModel API not available in this Chrome version' };
-  }
-  
-  const aiObj = self.ai || self.LanguageModel;
-  
-  try {
-    const status = await (aiObj.languageModel ? aiObj.languageModel.capabilities() : aiObj.availability());
-    const isAvailable = typeof status === 'object' ? status.available !== 'no' : status !== 'no';
-    return {
-      available: isAvailable,
-      needsDownload: typeof status === 'object' ? status.available === 'after-download' : status === 'after-download',
-      status: typeof status === 'object' ? status.available : status
-    };
-  } catch {
-    return { available: false, reason: 'API error' };
-  }
-}
-
-async function getAISession() {
-  if (aiSession) return aiSession;
-  
-  const aiObj = self.ai?.languageModel || self.LanguageModel;
-  
-  aiSession = await aiObj.create({
-    systemPrompt: `You are a keyword extraction expert for freelance job postings on Upwork. 
-When given job data, identify and return keywords in valid JSON only. No other text.`
-  });
-  
-  return aiSession;
-}
-
 async function extractKeywordsWithAI(jobs, session) {
-  const CHUNK_SIZE = 8;
-  const allResults = { skillKeywords: {}, titleKeywords: {}, actionPhrases: {} };
+  const CHUNK_SIZE = 10;
+  const allResults = {}; // Map of jobId -> {s, t, p}
   
   for (let i = 0; i < jobs.length; i += CHUNK_SIZE) {
     const chunk = jobs.slice(i, i + CHUNK_SIZE);
     const jobsText = chunk.map((job, idx) => 
-      `[JOB ${i + idx + 1}]\nTitle: ${job.title}\nDesc: ${job.description.substring(0, 300)}\nSkills: ${job.skills.join(', ')}`
-    ).join('\n\n');
+      `[J${idx+1}] T: ${job.title.substring(0,80)} | S: ${job.skills.slice(0,6).join(',')} | D: ${job.description.substring(0,60)}`
+    ).join('\n');
     
-    const prompt = `
-Analyze these ${chunk.length} Upwork job listings. Extract keywords.
-
+    const prompt = `Extract keywords for EACH job separately.
 ${jobsText}
-
-Return ONLY valid JSON, no markdown, no explanation:
-{
-  "skillKeywords": [{"keyword": "React", "count": 3, "importance": "high"}],
-  "titleKeywords": [{"keyword": "Developer Needed", "count": 5, "importance": "high"}],
-  "actionPhrases": [{"keyword": "looking for", "count": 4, "importance": "medium"}]
-}
-`;
+Return ONLY valid JSON: {"1": {"s":["skill"], "t":["title"], "p":["phrase"]}, "2": ...}`;
 
     try {
-      const response = await session.prompt(prompt);
-      const cleaned = response.replace(/```json|```/g, '').trim();
-      const parsed = JSON.parse(cleaned);
-      mergeKeywordResults(allResults, parsed);
-    } catch (err) {
-      console.warn(`[UKF] AI chunk ${i} failed:`, err);
-    }
-    
-    const processed = Math.min(i + CHUNK_SIZE, jobs.length);
-    chrome.runtime.sendMessage({
-      action: 'analyzeProgress',
-      processed: processed,
-      total: jobs.length
-    }).catch((e) => {});
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('AI timeout')), 60000));
+      const response = await Promise.race([session.prompt(prompt), timeout]);
+      const parsed = JSON.parse(response.replace(/```json|```/g, '').trim());
+      
+      chunk.forEach((job, idx) => {
+        const res = parsed[(idx+1).toString()];
+        if (res) allResults[job.jobId] = { s: res.s||[], t: res.t||[], p: res.p||[] };
+      });
+    } catch (err) { console.warn('Chunk failed', err); }
   }
-  
+  return allResults;
+}
+
+function aggregateAIResults(jobs, cache) {
+  const aggregated = { skillKeywords: {}, titleKeywords: {}, actionPhrases: {} };
+  jobs.forEach(job => {
+    const res = cache[job.jobId];
+    if (!res) return;
+    res.s.forEach(kw => updateCount(aggregated.skillKeywords, kw));
+    res.t.forEach(kw => updateCount(aggregated.titleKeywords, kw));
+    res.p.forEach(kw => updateCount(aggregated.actionPhrases, kw));
+  });
   return {
-    skillKeywords: topN(allResults.skillKeywords, 20),
-    titleKeywords: topN(allResults.titleKeywords, 20),
-    actionPhrases: topN(allResults.actionPhrases, 15)
+    skillKeywords: topN(aggregated.skillKeywords, 20),
+    titleKeywords: topN(aggregated.titleKeywords, 20),
+    actionPhrases: topN(aggregated.actionPhrases, 15)
   };
 }
-
-function mergeKeywordResults(accumulated, newChunk) {
-  ['skillKeywords', 'titleKeywords', 'actionPhrases'].forEach(category => {
-    if (!newChunk[category]) return;
-    newChunk[category].forEach(item => {
-      const key = item.keyword.toLowerCase();
-      if (accumulated[category][key]) {
-        accumulated[category][key].count += item.count;
-      } else {
-        accumulated[category][key] = { ...item };
-      }
-    });
-  });
-}
-
-function topN(obj, n) {
-  return Object.values(obj)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, n);
-}
-
-self.addEventListener('suspend', () => {
-  if (aiSession && typeof aiSession.destroy === 'function') {
-      aiSession.destroy(); 
-      aiSession = null; 
-  }
-});
 ```
 
 ---
 
 ## 12. Side Panel HTML & UI
 
-### 12.1 Structure
+### 12.1 Layout Strategy (Flex-Column)
 
-The side panel has 4 main views:
-1. **Home** — Status, scrape button, stats summary
-2. **Results** — Keyword results after scraping (tabbed: Skills, Titles, Phrases)
-3. **History** — List of past scrape sessions with job counts and timestamps
-4. **Settings** — Min frequency threshold, highlight on/off, export button
+To ensure a premium feel and prevent the "disappearing button" problem, the side panel uses a **non-scrollable outer container** with three distinct zones:
+1. **kf-header** (Fixed): Shows total job count and the primary "Start Analyzing" button.
+2. **kf-scroll** (Scrollable): Contains the actual keyword result lists (AI results above algorithm results).
+3. **analyze-progress** (Sticky Bottom): A progress banner that appears during AI tasks, showing live stats without overlapping content.
 
-### 12.2 sidepanel.html
+### 12.2 sidepanel.html Structure
 
 ```html
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="sidepanel.css">
-  <title>Upwork Keyword Finder</title>
-</head>
-<body>
-  <div id="app">
-    
-    <!-- Header -->
-    <header class="sp-header">
-      <div class="sp-logo">🔍 Keyword Finder</div>
-      <div id="ai-badge" class="badge" style="display:none"></div>
-    </header>
+<div id="view-results" class="view">
+  <!-- 1. Top Header -->
+  <div class="kf-header">
+    <div class="kf-job-count" id="kf-total-jobs">0</div>
+    <button id="btn-analyze" class="btn btn-primary">🧠 Start Analyzing</button>
+  </div>
 
-    <!-- Nav Tabs -->
-    <nav class="sp-nav">
-      <button class="nav-tab active" data-view="home">Home</button>
-      <button class="nav-tab" data-view="results">Results</button>
-      <button class="nav-tab" data-view="history">History</button>
-      <button class="nav-tab" data-view="settings">Settings</button>
-    </nav>
-
-    <!-- View: Home -->
-    <div id="view-home" class="view active">
-      <div id="page-status"></div>
-      
-      <div class="scrape-section">
-        <button id="btn-scrape" class="btn btn-primary" disabled>
-          🕷️ Scrape Jobs on This Page
-        </button>
-        <p class="hint" id="scrape-hint">Navigate to an Upwork job search page first</p>
-      </div>
-      
-      <div id="scrape-progress" style="display:none">
-        <div class="progress-bar"><div class="progress-fill"></div></div>
-        <p id="progress-text">Scraping jobs...</p>
-      </div>
-      
-      <div id="home-stats" class="stats-grid" style="display:none">
-        <div class="stat-card">
-          <span class="stat-number" id="stat-sessions">0</span>
-          <span class="stat-label">Scrape Sessions</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-number" id="stat-jobs">0</span>
-          <span class="stat-label">Total Jobs Stored</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-number" id="stat-last-count">0</span>
-          <span class="stat-label">Jobs Last Scrape</span>
-        </div>
-      </div>
+  <!-- 2. Scrollable Body -->
+  <div class="kf-scroll">
+    <div id="results-content">
+       <!-- AI Section -->
+       <div id="ai-results-section">...</div>
+       <!-- Algorithm Section -->
+       <div class="kf-section-label">⚙️ Smart Algorithm</div>
+       ...
     </div>
+  </div>
 
-    <!-- View: Results -->
-    <div id="view-results" class="view">
-      <div id="no-results-msg">Run a scrape to see results</div>
-      
-      <div id="results-content" style="display:none">
-        <div class="results-meta">
-          <span id="results-count"></span>
-          <span id="results-method"></span>
-        </div>
-        
-        <div class="tab-bar">
-          <button class="tab active" data-tab="skills">Skills & Tech</button>
-          <button class="tab" data-tab="titles">Title Words</button>
-          <button class="tab" data-tab="phrases">Phrases</button>
-        </div>
-
-        <div id="tab-skills" class="tab-content active"></div>
-        <div id="tab-titles" class="tab-content"></div>
-        <div id="tab-phrases" class="tab-content"></div>
-        
-        <div class="actions-row">
-          <button id="btn-copy-keywords" class="btn btn-secondary">📋 Copy Keywords</button>
-          <button id="btn-clear-highlights" class="btn btn-secondary">✕ Clear Highlights</button>
-        </div>
-      </div>
-    </div>
+  <!-- 3. Sticky Bottom Banner -->
+  <div id="analyze-progress">
+    <div class="progress-bar"><div class="progress-fill"></div></div>
+    <div id="ai-live-stats">...</div>
+  </div>
+</div>
+```
 
     <!-- View: History -->
     <div id="view-history" class="view">

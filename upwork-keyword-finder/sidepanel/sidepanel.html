@@ -25,8 +25,10 @@
       <button class="nav-tab" data-view="settings">Settings</button>
     </nav>
 
-    <!-- View: Home -->
-    <div id="view-home" class="view active" style="overflow-y:auto;">
+    <!-- ═══════════════════════════════════════
+         View: Home
+    ═══════════════════════════════════════ -->
+    <div id="view-home" class="view active">
       <div id="page-status"></div>
 
       <div class="scrape-section">
@@ -40,10 +42,10 @@
         <div class="progress-bar">
           <div class="progress-fill"></div>
         </div>
-        <p id="progress-text">Scraping jobs...</p>
+        <p id="progress-text" style="font-size:12px; color:var(--text-light); margin:6px 0 0;">Scraping jobs...</p>
       </div>
 
-      <div id="home-stats" class="stats-grid" style="display:none; margin-top: 20px;">
+      <div id="home-stats" class="stats-grid" style="display:none;">
         <div class="stat-card" style="grid-column: 1 / -1;">
           <span class="stat-label">Last Extraction</span>
           <span class="stat-number" id="stat-last-extracted-time" style="font-size: 1rem;">Never</span>
@@ -60,14 +62,16 @@
 
       <div class="dashboard-section" style="margin-top: 20px;">
         <button id="btn-view-analytics" class="btn btn-primary"
-          style="background-color: var(--primary-color); width: 100%; padding: 12px; font-weight: bold;">
+          style="background-color: var(--primary); padding: 12px; font-weight: bold;">
           📊 Open Analytics Dashboard
         </button>
       </div>
     </div>
 
-    <!-- View: History -->
-    <div id="view-history" class="view" style="overflow-y:auto;">
+    <!-- ═══════════════════════════════════════
+         View: History
+    ═══════════════════════════════════════ -->
+    <div id="view-history" class="view">
       <div class="history-header">
         <h3>Extraction History</h3>
       </div>
@@ -76,111 +80,109 @@
       </div>
     </div>
 
-    <!-- View: Keyword Finder (was Results) -->
-    <div id="view-results" class="view" style="position:relative; overflow:auto; display:flex; flex-direction:column;">
-      <div style="text-align: center; margin-bottom: 20px;">
-        <h2 style="margin: 0; color: var(--primary);"><span id="kf-total-jobs">0</span></h2>
-        <span style="font-size: 12px; color: var(--text-light);">Jobs in Database</span>
-        <button id="btn-analyze" class="btn btn-primary" style="margin-top: 15px;">
-          🧠 Start Analyzing
+    <!-- ═══════════════════════════════════════
+    View: Keyword Finder
+    ═══════════════════════════════════════ -->
+    <div id="view-results" class="view">
+
+      <div class="kf-header">
+        <div class="kf-job-count" id="kf-total-jobs">0</div>
+        <span class="kf-job-label">Jobs Analyzed</span>
+        <button id="btn-analyze" class="btn btn-primary">
+          🧠 Analyze Keywords
         </button>
       </div>
 
-      <div id="no-results-msg">Click 'Start Analyzing' to see keywords</div>
 
-      <!-- AI Progress — sticky bottom banner, overlays on top of results -->
-      <div id="analyze-progress" style="display:none; flex-shrink:0;
-           background:#fff; border-top:2px solid var(--primary); padding:10px 16px;margin-bottom:16px;">
-        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-          <div class="progress-bar" style="flex:1; margin-top:0;">
-            <div class="progress-fill" id="analyze-progress-fill"></div>
-          </div>
-          <span id="analyze-progress-text" style="font-size:11px; font-weight:bold;
-               white-space:nowrap; color:var(--primary); min-width:60px; text-align:right;">
-            Analyzing…
-          </span>
+
+      <!-- 3. AI Progress banner — docked at bottom, never pushes content up -->
+      <div id="analyze-progress" style="display:none;">
+        <div class="progress-bar">
+          <div class="progress-fill" id="analyze-progress-fill"></div>
         </div>
-        <div id="ai-live-stats" style="display:none; background:#1a1a2e; color:white;
-             border-radius:6px; padding:8px 10px; font-size:11px; line-height:1.7;">
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:2px 10px;">
+        <span id="analyze-progress-text">Analyzing…</span>
+
+        <div id="ai-live-stats" style="display:none;">
+          <div class="stat-grid">
             <span>📦 Chunks: <strong id="stat-chunks">—</strong></span>
             <span>⏱️ Elapsed: <strong id="stat-elapsed">0s</strong></span>
             <span>🧩 Skills: <strong id="stat-skills-running">—</strong></span>
             <span>📊 <strong id="stat-chunk-status">—</strong></span>
           </div>
-          <div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.1);
-               padding-top:4px; font-size:10px; color:#ccc;">
+          <div class="titles-row">
             🤖 <span id="stat-current-titles" style="font-style:italic;">Waiting for AI…</span>
           </div>
         </div>
       </div>
 
-      <!-- Results shown immediately after algorithm runs -->
-      <div id="results-content" style="display:none; flex-direction:column;">
-        <div class="results-meta" style="margin-bottom:8px;">
-          <span id="results-count"></span>
-          <span id="results-method"></span>
-        </div>
+      <!-- Unified Tab Bar -->
+      <div class="tab-bar-unified">
+        <button class="tab-u active" data-tab="skills">Skills</button>
+        <button class="tab-u" data-tab="titles">Titles</button>
+        <button class="tab-u" data-tab="phrases">Phrases</button>
+      </div>
 
-        <div class="tab-bar">
-          <button class="tab active" data-tab="skills">Skills & Tech</button>
-          <button class="tab" data-tab="titles">Title Words</button>
-          <button class="tab" data-tab="phrases">Phrases</button>
-        </div>
+      <div class="kf-scroll">
+        <!-- Placeholder -->
+        <div id="no-results-msg">Click 'Analyze Keywords' to start</div>
 
-        <div id="tab-skills" class="tab-content active">
-          <div class="result-columns">
-            <div class="result-col" id="col-skills-algo">
-              <h4>Auto Algorithm</h4>
-              <div class="kw-list"></div>
+        <div id="results-content" style="display:none;">
+
+          <!-- Tab Content: Skills -->
+          <div id="tab-u-skills" class="tab-content-u active">
+            <div class="source-section ai" id="ai-skills-container" style="display:none;">
+              <div class="source-label">🤖 AI SUGGESTED</div>
+              <div class="kw-list" id="col-skills-ai"></div>
             </div>
-            <div class="result-col" id="col-skills-ai">
-              <h4>AI Results</h4>
-              <div class="kw-list"></div>
+            <div class="source-section algo">
+              <div class="source-label">⚙️ STATISTICAL (ALGO)</div>
+              <div class="kw-list" id="col-skills-algo"></div>
             </div>
           </div>
-        </div>
-        <div id="tab-titles" class="tab-content">
-          <div class="result-columns">
-            <div class="result-col" id="col-titles-algo">
-              <h4>Auto Algorithm</h4>
-              <div class="kw-list"></div>
-            </div>
-            <div class="result-col" id="col-titles-ai">
-              <h4>AI Results</h4>
-              <div class="kw-list"></div>
-            </div>
-          </div>
-        </div>
-        <div id="tab-phrases" class="tab-content">
-          <div class="result-columns">
-            <div class="result-col" id="col-phrases-algo">
-              <h4>Auto Algorithm</h4>
-              <div class="kw-list"></div>
-            </div>
-            <div class="result-col" id="col-phrases-ai">
-              <h4>AI Results</h4>
-              <div class="kw-list"></div>
-            </div>
-          </div>
-        </div>
 
-        <div class="actions-row">
-          <button id="btn-copy-keywords" class="btn btn-secondary">📋 Copy Keywords</button>
-          <button id="btn-clear-highlights" class="btn btn-secondary">✕ Clear Highlights</button>
+          <!-- Tab Content: Titles -->
+          <div id="tab-u-titles" class="tab-content-u">
+            <div class="source-section ai" id="ai-titles-container" style="display:none;">
+              <div class="source-label">🤖 AI SUGGESTED</div>
+              <div class="kw-list" id="col-titles-ai"></div>
+            </div>
+            <div class="source-section algo">
+              <div class="source-label">⚙️ STATISTICAL (ALGO)</div>
+              <div class="kw-list" id="col-titles-algo"></div>
+            </div>
+          </div>
+
+          <!-- Tab Content: Phrases -->
+          <div id="tab-u-phrases" class="tab-content-u">
+            <div class="source-section ai" id="ai-phrases-container" style="display:none;">
+              <div class="source-label">🤖 AI SUGGESTED</div>
+              <div class="kw-list" id="col-phrases-ai"></div>
+            </div>
+            <div class="source-section algo">
+              <div class="source-label">⚙️ STATISTICAL (ALGO)</div>
+              <div class="kw-list" id="col-phrases-algo"></div>
+            </div>
+          </div>
+
+          <div class="actions-row" style="padding: 16px 0;">
+            <button id="btn-copy-keywords" class="btn btn-secondary">📋 Copy</button>
+            <button id="btn-clear-highlights" class="btn btn-secondary">✕ Clear</button>
+          </div>
         </div>
       </div>
 
 
-    </div>
 
+    </div><!-- end #view-results -->
 
-    <!-- View: Settings -->
-    <div id="view-settings" class="view" style="overflow-y:auto;">
+    <!-- ═══════════════════════════════════════
+         View: Settings
+    ═══════════════════════════════════════ -->
+    <div id="view-settings" class="view">
       <div class="setting-row">
         <label>Custom Toolbar Emojis</label>
         <br />
-        <textarea rows="4" id="pref-custom-emojis" value="⚡,⭐,🔥,🚀,💡,📌,❗,✅,❌,🛠️,💻,📈"></textarea>
+        <textarea rows="4" id="pref-custom-emojis">⚡,⭐,🔥,🚀,💡,📌,❗,✅,❌,🛠️,💻,📈</textarea>
       </div>
       <div class="setting-row">
         <label>Min keyword frequency</label>

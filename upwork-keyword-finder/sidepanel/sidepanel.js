@@ -158,16 +158,18 @@ function setupEventListeners() {
   document.getElementById('pref-min-freq').addEventListener('change', savePrefsHandler);
   document.getElementById('pref-highlight').addEventListener('change', savePrefsHandler);
 
-  // Result Tabs
-  document.querySelectorAll('.tab-bar .tab').forEach(btn => {
+  // Result Tabs — two independent groups: AI tabs and Algo tabs
+  // Result Tabs — Unified (Skills, Titles, Phrases)
+  document.querySelectorAll('.tab-u').forEach(btn => {
     btn.addEventListener('click', (e) => {
-      console.log('[SidePanel] Result sub-tab clicked:', e.target.dataset.tab);
-      document.querySelectorAll('.tab-bar .tab').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      
+      const tabId = e.target.dataset.tab;
+      // Active tab styling
+      document.querySelectorAll('.tab-u').forEach(b => b.classList.remove('active'));
       e.target.classList.add('active');
-      const targetContent = document.getElementById(`tab-${e.target.dataset.tab}`);
-      if (targetContent) targetContent.classList.add('active');
+      // Show matching content
+      document.querySelectorAll('.tab-content-u').forEach(c => c.classList.remove('active'));
+      const target = document.getElementById(`tab-u-${tabId}`);
+      if (target) target.classList.add('active');
     });
   });
 }
@@ -440,41 +442,50 @@ async function loadHistory() {
 }
 
 function displayKeywords(data) {
-  console.log('[SidePanel] Displaying keyword analysis results');
+  console.log('[SidePanel] Displaying unified keyword analysis results');
   const noRes = document.getElementById('no-results-msg');
   const content = document.getElementById('results-content');
+  
   if (noRes) noRes.style.display = 'none';
-  if (content) content.style.display = 'flex';  // flex to fill available height in column layout
-  
-  const methodEl = document.getElementById('results-method');
-  if (methodEl) {
-      const aiPending = data.method === 'algorithm';
-      methodEl.innerHTML = `Method: <strong>${data.method === 'both' ? '🤖 Algorithm + AI' : '⚙️ Algorithm only'}</strong>${aiPending ? ' &nbsp;<em style="color:#888;font-size:11px;">(AI running…)</em>' : ''}`;
-  }
-  
-  const algoData = data.algorithm || data; // fallback just in case
+  if (content) content.style.display = 'block';
+
+  const algoData = data.algorithm || data;
   const aiData = data.ai || null;
-  
+
+  // Algorithm Lists
   renderKeywordList('col-skills-algo', algoData.skillKeywords);
   renderKeywordList('col-titles-algo', algoData.titleKeywords);
   renderKeywordList('col-phrases-algo', algoData.actionPhrases);
 
-  // AI columns: show placeholder if AI hasn't finished yet
-  renderKeywordList('col-skills-ai', aiData?.skillKeywords, !aiData);
-  renderKeywordList('col-titles-ai', aiData?.titleKeywords, !aiData);
-  renderKeywordList('col-phrases-ai', aiData?.actionPhrases, !aiData);
+  // AI Lists & Containers
+  const mapping = [
+    { id: 'skills', key: 'skillKeywords' },
+    { id: 'titles', key: 'titleKeywords' },
+    { id: 'phrases', key: 'actionPhrases' }
+  ];
+
+  mapping.forEach(m => {
+    const container = document.getElementById(`ai-${m.id}-container`);
+    if (aiData && aiData[m.key] && aiData[m.key].length > 0) {
+      container.style.display = 'block';
+      renderKeywordList(`col-${m.id}-ai`, aiData[m.key]);
+    } else {
+      container.style.display = 'none';
+    }
+  });
 }
 
 function renderKeywordList(containerId, items, pending = false) {
-  const container = document.querySelector(`#${containerId} .kw-list`);
-  if (!container) return;
+  // Try direct ID first, then fall back to child .kw-list selector
+  const container = document.getElementById(containerId) || document.querySelector(`#${containerId} .kw-list`);
+  if (!container) { console.warn('[SidePanel] renderKeywordList: container not found:', containerId); return; }
   container.innerHTML = '';
   if (pending) {
-     container.innerHTML = '<div style="padding: 1rem; color: #888; font-style: italic; text-align:center;">⏳ AI analyzing…</div>';
+     container.innerHTML = '<div style="padding:1rem; color:#888; font-style:italic; text-align:center;">⏳ AI analyzing…</div>';
      return;
   }
   if (!items || items.length === 0) {
-     container.innerHTML = '<div style="padding: 1rem; color: #8b949e">No results found</div>';
+     container.innerHTML = '<div style="padding:1rem; color:#999;">No results found</div>';
      return;
   }
   items.forEach(item => {

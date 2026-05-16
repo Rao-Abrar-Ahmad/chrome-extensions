@@ -1,19 +1,32 @@
+/* =========================================================
+   Upwork Keyword Finder — Side Panel Styles
+   ========================================================= */
+
 :root {
   --primary: #14a800;
-  --primary-color: #14a800;
   --primary-hover: #108a00;
-  --secondary: #e0e0e0;
-  --background: #f9f9f9;
-  --text: #333;
+  --primary-light: #e8f5e9;
+  --secondary: #e8e8e8;
+  --background: #f4f5f7;
+  --surface: #ffffff;
+  --border: #e0e0e0;
+  --text: #1a1a1a;
   --text-light: #666;
+  --text-muted: #999;
   --danger: #d93025;
+  --ai-bg: #1a1a2e;
+}
+
+/* ── Base ─────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
 }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   margin: 0;
   padding: 0;
-  background-color: var(--background);
+  background: var(--background);
   color: var(--text);
   font-size: 14px;
 }
@@ -22,104 +35,125 @@ body {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  overflow: hidden;
 }
 
+/* ── Header ───────────────────────────────────────────── */
 .sp-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
-  background-color: #fff;
-  border-bottom: 1px solid #ddd;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .sp-logo {
-  font-weight: bold;
-  font-size: 16px;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text);
 }
 
 .badge {
   font-size: 10px;
-  padding: 4px 8px;
+  padding: 3px 8px;
   border-radius: 12px;
-  background-color: #e3f2fd;
-  color: #1976d2;
-  font-weight: bold;
+  background: #e3f2fd;
+  color: #1565c0;
+  font-weight: 700;
 }
 
+/* ── Nav ──────────────────────────────────────────────── */
 .sp-nav {
   display: flex;
-  background-color: #fff;
-  border-bottom: 1px solid #ddd;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .nav-tab {
   flex: 1;
   background: none;
   border: none;
-  padding: 12px 0;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--text-light);
   border-bottom: 2px solid transparent;
+  padding: 10px 0;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-light);
+  transition: color 0.15s, border-color 0.15s;
 }
 
 .nav-tab.active {
   color: var(--primary);
-  border-bottom: 2px solid var(--primary);
-  font-weight: bold;
+  border-bottom-color: var(--primary);
+  font-weight: 700;
 }
 
+/* ── Views — all views hidden by default ──────────────── */
 .view {
   display: none;
-  padding: 16px;
+  /* hidden by default */
   flex: 1;
-  overflow: hidden; /* let child elements control their own scroll */
+  overflow-y: auto;
+  /* each view scrolls independently */
+  padding: 16px;
 }
 
 .view.active {
   display: block;
 }
 
+/* view-results overrides: flex column so AI banner docks bottom */
+#view-results.active {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* children control their own scroll */
+  padding: 0;
+}
+
+/* ── Buttons ──────────────────────────────────────────── */
 .btn {
   width: 100%;
   padding: 10px;
   border: none;
   border-radius: 6px;
   font-size: 14px;
-  font-weight: bold;
+  font-weight: 700;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.18s, opacity 0.18s;
 }
 
 .btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .btn-primary {
-  background-color: var(--primary);
+  background: var(--primary);
   color: #fff;
 }
 
 .btn-primary:not(:disabled):hover {
-  background-color: var(--primary-hover);
+  background: var(--primary-hover);
 }
 
 .btn-secondary {
-  background-color: var(--secondary);
+  background: var(--secondary);
   color: var(--text);
 }
 
 .btn-secondary:hover {
-  background-color: #ccc;
+  background: #ccc;
 }
 
 .btn-danger {
-  background-color: var(--danger);
+  background: var(--danger);
   color: #fff;
 }
 
+/* ── Hints & Labels ───────────────────────────────────── */
 .hint {
   font-size: 12px;
   color: var(--text-light);
@@ -127,91 +161,46 @@ body {
   margin-top: 8px;
 }
 
+/* ── Home Stats ───────────────────────────────────────── */
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 20px;
 }
 
 .stat-card {
-  background: #fff;
-  padding: 16px;
+  background: var(--surface);
+  padding: 14px;
   border-radius: 8px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   text-align: center;
 }
 
 .stat-number {
   display: block;
-  font-size: 24px;
-  font-weight: bold;
+  font-size: 22px;
+  font-weight: 700;
   color: var(--primary);
 }
 
 .stat-label {
   font-size: 11px;
   color: var(--text-light);
-  margin-top: 4px;
+  margin-top: 3px;
 }
 
-.tab-bar {
-  display: flex;
-  margin: 16px 0;
-  border-bottom: 1px solid #ddd;
+/* ── Scrape Progress (Home) ───────────────────────────── */
+#scrape-progress {
+  margin-top: 12px;
 }
 
-.tab {
-  flex: 1;
-  background: none;
-  border: none;
-  padding: 8px 0;
-  cursor: pointer;
-  color: var(--text-light);
-}
-
-.tab.active {
-  color: #333;
-  font-weight: bold;
-  border-bottom: 2px solid #333;
-}
-
-.tab-content {
-  display: none;
-}
-
-.tab-content.active {
-  display: block;
-}
-
-.keyword-item {
-  display: flex;
-  justify-content: space-between;
-  padding: 8px;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  margin-bottom: 6px;
-}
-
-.kw-badge {
-  background: #eee;
-  padding: 2px 6px;
-  border-radius: 10px;
-  font-size: 11px;
-}
-
-.actions-row {
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-}
-
+/* ── History ──────────────────────────────────────────── */
 .history-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .history-header h3 {
@@ -219,13 +208,14 @@ body {
 }
 
 .history-item {
-  background: #fff;
+  background: var(--surface);
   padding: 12px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   border-radius: 8px;
   margin-bottom: 10px;
 }
 
+/* ── Settings ─────────────────────────────────────────── */
 .setting-row {
   display: flex;
   justify-content: space-between;
@@ -234,44 +224,216 @@ body {
   border-bottom: 1px solid #eee;
 }
 
+/* ── Progress Bar ─────────────────────────────────────── */
 .progress-bar {
   height: 6px;
   background: #ddd;
   border-radius: 3px;
   overflow: hidden;
-  margin-top: 16px;
+  margin-top: 10px;
 }
 
 .progress-fill {
   height: 100%;
-  width: 50%;
+  width: 40%;
   background: var(--primary);
-  animation: pulse 1s infinite alternate;
+  border-radius: 3px;
+  animation: pulse-bar 1.2s ease-in-out infinite alternate;
+  transition: width 0.4s ease;
 }
 
-@keyframes pulse {
+@keyframes pulse-bar {
   0% {
-    width: 30%;
+    opacity: 0.7;
   }
 
   100% {
-    width: 80%;
+    opacity: 1;
   }
 }
 
-.result-columns {
+/* ═══════════════════════════════════════════════════════
+   KEYWORD FINDER VIEW  (#view-results)
+   ═══════════════════════════════════════════════════════ */
+
+#view-results.active {
   display: flex;
-  gap: 16px;
+  flex-direction: column;
+  overflow: auto;
+  padding: 0;
+  background: var(--surface);
 }
 
-.result-col {
-  flex: 1;
+.kf-header {
+  padding: 20px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  text-align: center;
 }
 
-.result-col h4 {
-  margin: 0 0 10px 0;
+.kf-job-count {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--primary);
+  line-height: 1;
+}
+
+.kf-job-label {
   font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 15px;
+  display: block;
+}
+
+/* Unified Tab Bar */
+.tab-bar-unified {
+  display: flex;
+  background: #f8f9fa;
+  padding: 4px;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-u {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-light);
-  border-bottom: 1px solid #eee;
-  padding-bottom: 4px;
+  transition: all 0.2s;
+}
+
+.tab-u.active {
+  background: #fff;
+  color: var(--primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.kf-scroll {
+  padding: 0;
+}
+
+.tab-content-u {
+  display: none;
+  padding: 16px;
+}
+
+.tab-content-u.active {
+  display: block;
+}
+
+/* Source Sections (AI vs Algo) */
+.source-section {
+  margin-bottom: 24px;
+}
+
+.source-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  opacity: 0.5;
+}
+
+.ai .source-label {
+  color: #673ab7;
+}
+
+.ai .source-label::after {
+  background: #d1c4e9;
+}
+
+/* Keyword Items */
+.keyword-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  transition: transform 0.1s;
+}
+
+.keyword-item:hover {
+  border-color: var(--primary);
+  background: #f9fff9;
+}
+
+.kw-badge {
+  background: #f0f0f0;
+  color: #555;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ai .kw-badge {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+/* AI Progress Banner */
+#analyze-progress {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: #fff;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
+}
+
+#analyze-progress-text {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: 8px;
+  display: block;
+}
+
+#ai-live-stats {
+  background: #2c3e50;
+  color: #ecf0f1;
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+/* Actions */
+.actions-row {
+  display: flex;
+  gap: 10px;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  margin-top: 20px;
+}
+
+.actions-row .btn {
+  flex: 1;
+  padding: 10px;
+  font-size: 13px;
+}
+
+#no-results-msg {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
 }
